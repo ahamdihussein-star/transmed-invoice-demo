@@ -157,24 +157,153 @@
         }
 
         function extractData(text) {
-            // Extract invoice number
-            const invoice = text.match(/(?:INVOICE|INV|#)[:\s#]*([A-Z0-9\-]+)/i)?.[1] || 
-                           text.match(/\b\d{10,}\b/)?.[0];
+            // Clean and normalize text
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            
+            // Extract invoice number - look for long numbers near "invoice" or "number" keywords
+            let invoice = null;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                // Look for patterns like "Number 3010600056969" or "Invoice: 12345"
+                if (/(?:number|invoice|inv|#)/i.test(line)) {
+                    const numberMatch = line.match(/\b\d{10,15}\b/) || 
+                                       lines[i+1]?.match(/\b\d{10,15}\b/);
+                    if (numberMatch) {
+                        invoice = numberMatch[0];
+                        break;
+                    }
+                }
+            }
+            // Fallback: find any 10-15 digit number in the document
+            if (!invoice) {
+                invoice = text.match(/\b\d{10,15}\b/)?.[0];
+            }
             if (invoice) data.invoice = invoice;
 
-            // Extract supplier (look for company names)
-            const supplier = text.match(/([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*\s+(?:AB|EMEA|LLC|LTD|INC|GMBH))/)?.[1] ||
-                           text.match(/^([A-Z][A-Za-z\s&]+)$/m)?.[1];
+            // Extract supplier - look for company names with proper capitalization
+            let supplier = null;
+            // Pattern 1: Company name with legal suffix (AB, LLC, LTD, INC, S.A., GMBH, etc.)
+            supplier = text.match(/([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,4}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))/i)?.[1];
+            
+            // Pattern 2: Look in first 10 lines for capitalized company names
+            if (!supplier) {
+                for (let i = 0; i < Math.min(10, lines.length); i++) {
+                    const line = lines[i];
+                    // Look for 2-4 capitalized words (typical company name)
+                    const match = line.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})$/);
+                    if (match && match[1].length > 5) {
+                        supplier = match[1];
+                        break;
+                    }
+                }
+            }
             if (supplier) data.supplier = supplier.trim();
 
-            // Extract amount
-            const amount = text.match(/(?:TOTAL|AMOUNT|SUBTOTAL)[:\s]*([0-9,\.]+)/i)?.[1] ||
-                         text.match(/([0-9]{1,3}(?:[,\.]\d{3})*[,\.]\d{2})/)?.[1];
-            if (amount) data.amount = amount.replace(/,/g, '');
+            // Extract amount - look for currency amounts near "total" or "amount" keywords
+            let amount = null;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (/(?:invoice\s+amount|total|amount|subtotal)/i.test(line)) {
+                    // Look for numbers with decimal point and 2 decimal places
+                    const amountMatch = line.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/) ||
+                                       lines[i+1]?.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/);
+                    if (amountMatch) {
+                        amount = amountMatch[1];
+                        break;
+                    }
+                }
+            }
+            // Fallback: find any large number with 2 decimals (likely an amount)
+            if (!amount) {
+                amount = text.match(/\b([0-9]{1,3}(?:[,\s]\d{3})+[,\.]\d{2})\b/)?.[1] ||
+                        text.match(/\b([0-9]{4,}[,\.]\d{2})\b/)?.[1];
+            }
+            if (amount) {
+                // Clean up: remove spaces, convert European format (1.234,56) to US format (1234.56)
+                data.amount = amount.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+                // If it still has multiple dots, keep only last one
+                const parts = data.amount.split('.');
+                if (parts.length > 2) {
+                    data.amount = parts.slice(0, -1).join('') + '.' + parts[parts.length - 1];
+                }
+            }
 
-            // Extract currency
-            const currency = text.match(/\b(EUR|USD|GBP|AED|SAR)\b/)?.[1];
-            if (currency) data.currency = currency;
+            // Extract currency - look for standard currency codes
+            const currency = text.match(/\b(EUR|USD|GBP|AED|SAR|JPY|CHF|CAD|AUD|CNY|INR)\b/i)?.[1];
+            if (currency) data.currency = currency.toUpperCase();
+            
+            // Extract date - multiple date format patterns
+            let dateMatch = null;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (/(?:invoice\s+date|date|issued)/i.test(line)) {
+                    dateMatch = line.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/) ||
+                               lines[i+1]?.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
+                    if (dateMatch) break;
+                }
+            }
+            // Fallback: find any date in document
+            if (!dateMatch) {
+                dateMatch = text.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4})/);
+            }
+            
+            if (dateMatch) {
+                // Parse date from various formats
+                const dateStr = dateMatch[1];
+                const separator = dateStr.includes('/') ? '/' : dateStr.includes('-') ? '-' : '.';
+                const parts = dateStr.split(separator);
+                
+                if (parts.length === 3) {
+                    let day, month, year;
+                    
+                    // Detect year position (usually 4 digits)
+                    const yearIndex = parts.findIndex(p => p.length === 4);
+                    
+                    if (yearIndex === 2) {
+                        // Format: DD/MM/YYYY or MM/DD/YYYY
+                        const first = parseInt(parts[0]);
+                        const second = parseInt(parts[1]);
+                        
+                        if (first > 12) {
+                            // Must be DD/MM/YYYY
+                            day = parts[0].padStart(2, '0');
+                            month = parts[1].padStart(2, '0');
+                        } else if (second > 12) {
+                            // Must be MM/DD/YYYY
+                            month = parts[0].padStart(2, '0');
+                            day = parts[1].padStart(2, '0');
+                        } else {
+                            // Ambiguous - try both, prefer DD/MM/YYYY (international standard)
+                            // But check context: if month name appears nearby, use that
+                            const contextMonth = text.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i);
+                            if (contextMonth) {
+                                const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+                                const shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                                const monthNum = monthNames.findIndex(m => m.toLowerCase() === contextMonth[1].toLowerCase()) + 1 ||
+                                               shortMonths.findIndex(m => m.toLowerCase() === contextMonth[1].toLowerCase()) + 1;
+                                if (monthNum > 0) {
+                                    month = monthNum.toString().padStart(2, '0');
+                                    day = (first === monthNum ? second : first).toString().padStart(2, '0');
+                                }
+                            } else {
+                                // Default: assume DD/MM/YYYY (ISO standard outside US)
+                                day = parts[0].padStart(2, '0');
+                                month = parts[1].padStart(2, '0');
+                            }
+                        }
+                        year = parts[2];
+                    } else if (yearIndex === 0) {
+                        // Format: YYYY/MM/DD
+                        year = parts[0];
+                        month = parts[1].padStart(2, '0');
+                        day = parts[2].padStart(2, '0');
+                    }
+                    
+                    if (year && month && day) {
+                        data.date = `${year}-${month}-${day}`;
+                    }
+                }
+            }
 
             showExtracted();
             fillForm();
@@ -198,6 +327,7 @@
             if (data.supplier) document.getElementById('f-supplier').value = data.supplier;
             if (data.amount) document.getElementById('f-amount').value = data.amount;
             if (data.currency) document.getElementById('f-currency').value = data.currency;
+            if (data.date) document.getElementById('f-date').value = data.date;
         }
 
         function goToStep(n) {

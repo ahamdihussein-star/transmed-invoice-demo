@@ -13,7 +13,7 @@
     </style>
 </head>
 <body class="bg-gradient-to-br from-blue-900 via-blue-800 to-cyan-900 min-h-screen">
-    <div class="container mx-auto px-4 py-8 max-w-2xl">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
         <!-- Header -->
         <div class="text-center mb-8">
             <h1 class="text-4xl font-bold text-white mb-2">📄 Transmed Invoice Upload</h1>
@@ -32,8 +32,8 @@
         <!-- Step 1: Upload Invoice -->
         <div id="step1" class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 shadow-2xl animate-fadeIn">
             <div class="text-center mb-6">
-                <h2 class="text-2xl font-bold text-white mb-2">📤 Upload Invoice</h2>
-                <p class="text-blue-200">Upload your invoice PDF</p>
+                <h2 class="text-2xl font-bold text-white mb-2">📤 Upload Invoice(s)</h2>
+                <p class="text-blue-200">Upload your invoice PDF - supports multiple invoices in one file</p>
             </div>
 
             <div class="mb-6">
@@ -46,12 +46,13 @@
 
             <div id="ocr-status" class="text-center py-4 hidden">
                 <span class="spinner mr-2"></span>
-                <span class="text-cyan-400">Extracting data from invoice...</span>
+                <span class="text-cyan-400">Extracting data from invoice(s)...</span>
             </div>
 
             <div id="extracted-box" class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 hidden">
-                <p class="text-emerald-400 font-medium mb-2">✓ Data Extracted:</p>
-                <div id="extracted-text" class="text-white/80 text-sm space-y-1"></div>
+                <p class="text-emerald-400 font-medium mb-3">✓ Invoices Extracted:</p>
+                <div id="invoice-count" class="text-white/80 text-sm mb-2"></div>
+                <div id="extracted-text" class="text-white/80 text-sm space-y-2 max-h-48 overflow-y-auto"></div>
             </div>
 
             <button id="step1-btn" onclick="goToStep(2)" disabled class="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl disabled:opacity-50 transition-all mt-6">
@@ -59,41 +60,20 @@
             </button>
         </div>
 
-        <!-- Step 2: Review Data -->
+        <!-- Step 2: Review All Invoices -->
         <div id="step2" class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 shadow-2xl animate-fadeIn hidden">
             <div class="text-center mb-6">
-                <h2 class="text-2xl font-bold text-white mb-2">✏️ Review & Confirm</h2>
-                <p class="text-blue-200">Verify extracted information</p>
+                <h2 class="text-2xl font-bold text-white mb-2">✏️ Review All Invoices</h2>
+                <p class="text-blue-200">Verify extracted information for all invoices</p>
             </div>
 
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-white/80 mb-1">Invoice Number</label>
-                    <input type="text" id="f-invoice" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/40" placeholder="Enter invoice number">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-white/80 mb-1">Supplier Name</label>
-                    <input type="text" id="f-supplier" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/40" placeholder="Enter supplier">
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-white/80 mb-1">Amount</label>
-                        <input type="text" id="f-amount" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/40" placeholder="0.00">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-white/80 mb-1">Currency</label>
-                        <input type="text" id="f-currency" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/40" placeholder="EUR">
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-white/80 mb-1">Invoice Date</label>
-                    <input type="date" id="f-date" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white">
-                </div>
+            <div id="invoices-container" class="space-y-4 max-h-96 overflow-y-auto mb-6">
+                <!-- Invoices will be rendered here -->
             </div>
 
-            <div class="flex gap-3 mt-6">
+            <div class="flex gap-3">
                 <button onclick="goToStep(1)" class="flex-1 py-4 bg-white/10 text-white font-semibold rounded-xl">← Back</button>
-                <button onclick="submitData()" class="flex-1 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl">Submit</button>
+                <button onclick="submitData()" class="flex-1 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl">Submit All</button>
             </div>
         </div>
 
@@ -101,7 +81,7 @@
         <div id="step3" class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 shadow-2xl animate-fadeIn hidden text-center">
             <div class="text-6xl mb-4">✅</div>
             <h2 class="text-2xl font-bold text-white mb-4">Upload Complete!</h2>
-            <p class="text-blue-200 mb-6">Your invoice has been uploaded successfully.</p>
+            <p class="text-blue-200 mb-2"><span id="success-count"></span> invoice(s) uploaded successfully.</p>
             <p class="text-white/60 text-sm">Return to chat and type <span class="font-mono bg-white/10 px-2 py-1 rounded">"done"</span></p>
         </div>
     </div>
@@ -112,13 +92,12 @@
         
         let sessionId = 'DEMO';
         let file = null;
-        let data = { invoice: '', supplier: '', amount: '', currency: '', date: '' };
+        let invoices = []; // Array to store multiple invoices
 
         function init() {
             sessionId = 'DEMO';
             history.pushState({}, '', `/upload/${sessionId}`);
             document.getElementById('session-id').textContent = sessionId;
-            document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
             document.getElementById('invoice-input').onchange = handleFile;
         }
 
@@ -147,7 +126,7 @@
                 const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: formData });
                 const json = await res.json();
                 if (json.ParsedResults?.[0]) {
-                    extractData(json.ParsedResults[0].ParsedText);
+                    extractMultipleInvoices(json.ParsedResults[0].ParsedText);
                 }
             } catch (err) {
                 console.error('OCR error:', err);
@@ -156,56 +135,86 @@
             document.getElementById('ocr-status').classList.add('hidden');
         }
 
-        function extractData(text) {
-            // Clean and normalize text
-            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        function extractMultipleInvoices(text) {
+            // Split text into individual invoices based on "Number" keyword followed by long number
+            const lines = text.split('\n');
+            let invoiceSections = [];
+            let currentSection = [];
             
-            // Extract invoice number - look for long numbers near "invoice" or "number" keywords
-            let invoice = null;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // Detect start of new invoice: "Number" followed by 10+ digit number
+                if (/^Number$/i.test(line) && lines[i+1]?.match(/^\d{10,15}$/)) {
+                    // Save previous section if exists
+                    if (currentSection.length > 0) {
+                        invoiceSections.push(currentSection.join('\n'));
+                    }
+                    // Start new section
+                    currentSection = [line];
+                } else {
+                    currentSection.push(line);
+                }
+            }
+            
+            // Add last section
+            if (currentSection.length > 0) {
+                invoiceSections.push(currentSection.join('\n'));
+            }
+            
+            // If no clear sections found, treat entire text as one invoice
+            if (invoiceSections.length === 0) {
+                invoiceSections = [text];
+            }
+            
+            // Extract data from each invoice section
+            invoices = invoiceSections.map(section => extractSingleInvoice(section));
+            
+            // Filter out invalid invoices (no invoice number found)
+            invoices = invoices.filter(inv => inv.invoice && inv.invoice.length >= 10);
+            
+            showExtracted();
+            renderInvoicesForReview();
+        }
+
+        function extractSingleInvoice(text) {
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            let invoice = { invoice: '', supplier: '', amount: '', currency: '', date: '' };
+            
+            // Extract invoice number
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
-                // Look for patterns like "Number 3010600056969" or "Invoice: 12345"
-                if (/(?:number|invoice|inv|#)/i.test(line)) {
+                if (/(?:number|invoice)/i.test(line)) {
                     const numberMatch = line.match(/\b\d{10,15}\b/) || 
                                        lines[i+1]?.match(/\b\d{10,15}\b/);
                     if (numberMatch) {
-                        invoice = numberMatch[0];
+                        invoice.invoice = numberMatch[0];
                         break;
                     }
                 }
             }
-            // Fallback: find any 10-15 digit number in the document
-            if (!invoice) {
-                invoice = text.match(/\b\d{10,15}\b/)?.[0];
+            if (!invoice.invoice) {
+                invoice.invoice = text.match(/\b\d{10,15}\b/)?.[0] || '';
             }
-            if (invoice) data.invoice = invoice;
-
-            // Extract supplier - look for company names with proper capitalization
-            let supplier = null;
-            // Pattern 1: Company name with legal suffix (AB, LLC, LTD, INC, S.A., GMBH, etc.)
-            supplier = text.match(/([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,4}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))/i)?.[1];
             
-            // Pattern 2: Look in first 10 lines for capitalized company names
+            // Extract supplier
+            let supplier = text.match(/([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,4}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|S\.A\.|GMBH|PLC|CORP))/i)?.[1];
             if (!supplier) {
                 for (let i = 0; i < Math.min(10, lines.length); i++) {
-                    const line = lines[i];
-                    // Look for 2-4 capitalized words (typical company name)
-                    const match = line.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})$/);
+                    const match = lines[i].match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})$/);
                     if (match && match[1].length > 5) {
                         supplier = match[1];
                         break;
                     }
                 }
             }
-            if (supplier) data.supplier = supplier.trim();
-
-            // Extract amount - look for currency amounts near "total" or "amount" keywords
+            invoice.supplier = supplier?.trim() || '';
+            
+            // Extract amount
             let amount = null;
             for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                if (/(?:invoice\s+amount|total|amount|subtotal)/i.test(line)) {
-                    // Look for numbers with decimal point and 2 decimal places
-                    const amountMatch = line.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/) ||
+                if (/(?:invoice\s+amount|total)/i.test(lines[i])) {
+                    const amountMatch = lines[i].match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/) ||
                                        lines[i+1]?.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/);
                     if (amountMatch) {
                         amount = amountMatch[1];
@@ -213,121 +222,125 @@
                     }
                 }
             }
-            // Fallback: find any large number with 2 decimals (likely an amount)
             if (!amount) {
-                amount = text.match(/\b([0-9]{1,3}(?:[,\s]\d{3})+[,\.]\d{2})\b/)?.[1] ||
-                        text.match(/\b([0-9]{4,}[,\.]\d{2})\b/)?.[1];
+                amount = text.match(/\b([0-9]{1,3}(?:[,\s]\d{3})+[,\.]\d{2})\b/)?.[1];
             }
             if (amount) {
-                // Clean up: remove spaces, convert European format (1.234,56) to US format (1234.56)
-                data.amount = amount.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
-                // If it still has multiple dots, keep only last one
-                const parts = data.amount.split('.');
-                if (parts.length > 2) {
-                    data.amount = parts.slice(0, -1).join('') + '.' + parts[parts.length - 1];
-                }
+                invoice.amount = amount.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
             }
-
-            // Extract currency - look for standard currency codes
-            const currency = text.match(/\b(EUR|USD|GBP|AED|SAR|JPY|CHF|CAD|AUD|CNY|INR)\b/i)?.[1];
-            if (currency) data.currency = currency.toUpperCase();
             
-            // Extract date - multiple date format patterns
+            // Extract currency
+            const currency = text.match(/\b(EUR|USD|GBP|AED|SAR)\b/i)?.[1];
+            invoice.currency = currency?.toUpperCase() || '';
+            
+            // Extract invoice date (not due date)
             let dateMatch = null;
             for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                if (/(?:invoice\s+date|date|issued)/i.test(line)) {
-                    dateMatch = line.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/) ||
-                               lines[i+1]?.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
+                if (/^Invoice\s+date$/i.test(lines[i])) {
+                    dateMatch = lines[i+1]?.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
                     if (dateMatch) break;
+                } else if (/Invoice\s+date[:\s]/i.test(lines[i])) {
+                    dateMatch = lines[i].match(/Invoice\s+date[:\s]+(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i);
+                    if (dateMatch) {
+                        dateMatch = [dateMatch[0], dateMatch[1]];
+                        break;
+                    }
                 }
-            }
-            // Fallback: find any date in document
-            if (!dateMatch) {
-                dateMatch = text.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{4})/);
             }
             
             if (dateMatch) {
-                // Parse date from various formats
                 const dateStr = dateMatch[1];
-                const separator = dateStr.includes('/') ? '/' : dateStr.includes('-') ? '-' : '.';
-                const parts = dateStr.split(separator);
-                
-                if (parts.length === 3) {
-                    let day, month, year;
+                const parts = dateStr.split(/[\/\-\.]/);
+                if (parts.length === 3 && parts[2].length === 4) {
+                    const first = parseInt(parts[0]);
+                    const second = parseInt(parts[1]);
+                    let day, month, year = parts[2];
                     
-                    // Detect year position (usually 4 digits)
-                    const yearIndex = parts.findIndex(p => p.length === 4);
-                    
-                    if (yearIndex === 2) {
-                        // Format: DD/MM/YYYY or MM/DD/YYYY
-                        const first = parseInt(parts[0]);
-                        const second = parseInt(parts[1]);
-                        
-                        if (first > 12) {
-                            // Must be DD/MM/YYYY
-                            day = parts[0].padStart(2, '0');
-                            month = parts[1].padStart(2, '0');
-                        } else if (second > 12) {
-                            // Must be MM/DD/YYYY
-                            month = parts[0].padStart(2, '0');
-                            day = parts[1].padStart(2, '0');
-                        } else {
-                            // Ambiguous - try both, prefer DD/MM/YYYY (international standard)
-                            // But check context: if month name appears nearby, use that
-                            const contextMonth = text.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/i);
-                            if (contextMonth) {
-                                const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-                                const shortMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                                const monthNum = monthNames.findIndex(m => m.toLowerCase() === contextMonth[1].toLowerCase()) + 1 ||
-                                               shortMonths.findIndex(m => m.toLowerCase() === contextMonth[1].toLowerCase()) + 1;
-                                if (monthNum > 0) {
-                                    month = monthNum.toString().padStart(2, '0');
-                                    day = (first === monthNum ? second : first).toString().padStart(2, '0');
-                                }
-                            } else {
-                                // Default: assume DD/MM/YYYY (ISO standard outside US)
-                                day = parts[0].padStart(2, '0');
-                                month = parts[1].padStart(2, '0');
-                            }
-                        }
-                        year = parts[2];
-                    } else if (yearIndex === 0) {
-                        // Format: YYYY/MM/DD
-                        year = parts[0];
+                    if (first > 12) {
+                        day = parts[0].padStart(2, '0');
                         month = parts[1].padStart(2, '0');
-                        day = parts[2].padStart(2, '0');
+                    } else if (second > 12) {
+                        month = parts[0].padStart(2, '0');
+                        day = parts[1].padStart(2, '0');
+                    } else {
+                        // Default DD/MM/YYYY
+                        day = parts[0].padStart(2, '0');
+                        month = parts[1].padStart(2, '0');
                     }
                     
-                    if (year && month && day) {
-                        data.date = `${year}-${month}-${day}`;
-                    }
+                    invoice.date = `${year}-${month}-${day}`;
                 }
             }
-
-            showExtracted();
-            fillForm();
+            
+            return invoice;
         }
 
         function showExtracted() {
             const box = document.getElementById('extracted-box');
+            const countEl = document.getElementById('invoice-count');
             const txt = document.getElementById('extracted-text');
-            let html = '';
-            if (data.invoice) html += `<p><strong>Invoice:</strong> ${data.invoice}</p>`;
-            if (data.supplier) html += `<p><strong>Supplier:</strong> ${data.supplier}</p>`;
-            if (data.amount) html += `<p><strong>Amount:</strong> ${data.amount} ${data.currency || ''}</p>`;
-            if (html) {
+            
+            if (invoices.length > 0) {
+                countEl.textContent = `Found ${invoices.length} invoice(s)`;
+                let html = '';
+                invoices.forEach((inv, idx) => {
+                    html += `<div class="p-2 bg-white/5 rounded">
+                        <strong>Invoice ${idx + 1}:</strong> ${inv.invoice} - ${inv.supplier} - ${inv.amount} ${inv.currency}
+                    </div>`;
+                });
                 txt.innerHTML = html;
                 box.classList.remove('hidden');
             }
         }
 
-        function fillForm() {
-            if (data.invoice) document.getElementById('f-invoice').value = data.invoice;
-            if (data.supplier) document.getElementById('f-supplier').value = data.supplier;
-            if (data.amount) document.getElementById('f-amount').value = data.amount;
-            if (data.currency) document.getElementById('f-currency').value = data.currency;
-            if (data.date) document.getElementById('f-date').value = data.date;
+        function renderInvoicesForReview() {
+            const container = document.getElementById('invoices-container');
+            container.innerHTML = '';
+            
+            invoices.forEach((inv, idx) => {
+                const div = document.createElement('div');
+                div.className = 'bg-white/5 rounded-xl p-4 border border-white/10';
+                div.innerHTML = `
+                    <h3 class="text-white font-semibold mb-3">Invoice #${idx + 1}</h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1">Invoice Number</label>
+                            <input type="text" value="${inv.invoice}" data-idx="${idx}" data-field="invoice"
+                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1">Supplier</label>
+                            <input type="text" value="${inv.supplier}" data-idx="${idx}" data-field="supplier"
+                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1">Amount</label>
+                            <input type="text" value="${inv.amount}" data-idx="${idx}" data-field="amount"
+                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1">Currency</label>
+                            <input type="text" value="${inv.currency}" data-idx="${idx}" data-field="currency"
+                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
+                        </div>
+                        <div class="col-span-2">
+                            <label class="block text-xs text-white/60 mb-1">Invoice Date</label>
+                            <input type="date" value="${inv.date}" data-idx="${idx}" data-field="date"
+                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
+                        </div>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+            
+            // Add event listeners for field changes
+            document.querySelectorAll('.invoice-field').forEach(field => {
+                field.addEventListener('change', (e) => {
+                    const idx = parseInt(e.target.dataset.idx);
+                    const fieldName = e.target.dataset.field;
+                    invoices[idx][fieldName] = e.target.value;
+                });
+            });
         }
 
         function goToStep(n) {
@@ -346,13 +359,16 @@
 
         async function submitData() {
             const submittedData = {
-                invoice: document.getElementById('f-invoice').value,
-                supplier: document.getElementById('f-supplier').value,
-                amount: document.getElementById('f-amount').value,
-                currency: document.getElementById('f-currency').value,
-                date: document.getElementById('f-date').value,
+                invoices: invoices.map(inv => ({
+                    invoice: inv.invoice,
+                    supplier: inv.supplier,
+                    amount: inv.amount,
+                    currency: inv.currency,
+                    date: inv.date
+                })),
                 status: 'submitted',
-                submittedAt: new Date().toISOString()
+                submittedAt: new Date().toISOString(),
+                count: invoices.length
             };
 
             try {
@@ -363,6 +379,7 @@
                 });
                 
                 if (res.ok) {
+                    document.getElementById('success-count').textContent = invoices.length;
                     goToStep(3);
                 }
             } catch (err) {

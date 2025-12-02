@@ -92,7 +92,7 @@
         
         let sessionId = 'DEMO';
         let file = null;
-        let invoices = []; // Array to store multiple invoices
+        let invoices = [];
 
         function init() {
             sessionId = 'DEMO';
@@ -121,24 +121,21 @@
             formData.append('apikey', OCR_KEY);
             formData.append('language', 'eng');
             formData.append('OCREngine', '2');
-            formData.append('isTable', 'true'); // Better structure detection
+            formData.append('isTable', 'true');
 
             try {
                 const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: formData });
                 const json = await res.json();
                 
-                console.log('OCR Response:', json); // Debug logging
+                console.log('OCR Response:', json);
                 
                 if (json.ParsedResults && json.ParsedResults.length > 0) {
-                    // Check if multiple pages were processed
                     if (json.ParsedResults.length > 1) {
-                        // Multiple pages returned - process each separately
                         console.log('Multiple pages detected:', json.ParsedResults.length);
                         invoices = json.ParsedResults.map(result => 
                             extractSingleInvoice(result.ParsedText)
                         ).filter(inv => inv.invoice && inv.invoice.length >= 10);
                     } else {
-                        // Single result - might contain multiple invoices
                         const fullText = json.ParsedResults[0].ParsedText;
                         console.log('Text length:', fullText.length);
                         extractMultipleInvoices(fullText);
@@ -155,12 +152,10 @@
         }
 
         function extractMultipleInvoices(text) {
-            // Strategy 1: Find all invoice numbers using regex
             const invoicePattern = /\b(301060005\d{4}|301060006\d{4}|301060007\d{4})\b/g;
             let matches = [];
             let match;
             
-            // Find all invoice numbers and their positions
             while ((match = invoicePattern.exec(text)) !== null) {
                 matches.push({
                     number: match[1],
@@ -171,7 +166,6 @@
             console.log('Found invoice numbers:', matches.length);
             
             if (matches.length === 0) {
-                // Fallback: Try to find any 13-digit number
                 const genericPattern = /\b\d{13}\b/g;
                 while ((match = genericPattern.exec(text)) !== null) {
                     matches.push({
@@ -183,13 +177,10 @@
             }
             
             if (matches.length === 0) {
-                // No invoice numbers found, treat entire text as one invoice
                 invoices = [extractSingleInvoice(text)];
             } else if (matches.length === 1) {
-                // Only one invoice found
                 invoices = [extractSingleInvoice(text)];
             } else {
-                // Multiple invoices found - split text at each invoice number
                 let sections = [];
                 for (let i = 0; i < matches.length; i++) {
                     const start = matches[i].index;
@@ -199,14 +190,10 @@
                 }
                 
                 console.log('Split into sections:', sections.length);
-                
-                // Extract data from each section
                 invoices = sections.map(section => extractSingleInvoice(section));
             }
             
-            // Filter out invalid invoices
             invoices = invoices.filter(inv => inv.invoice && inv.invoice.length >= 10);
-            
             console.log('Final invoices count:', invoices.length);
         }
 
@@ -214,7 +201,7 @@
             const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
             let invoice = { invoice: '', supplier: '', amount: '', currency: '', date: '' };
             
-            // Extract invoice number - try multiple patterns
+            // ===== INVOICE NUMBER =====
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 if (/(?:number|invoice)/i.test(line)) {
@@ -227,61 +214,61 @@
                 }
             }
             if (!invoice.invoice) {
-                // Fallback: find first 13-digit number
                 invoice.invoice = text.match(/\b\d{13}\b/)?.[0] || 
                                  text.match(/\b\d{10,15}\b/)?.[0] || '';
             }
             
-            // Extract supplier - improved logic
-            // Strategy: Look in the first 20% of the text (header area)
-            // Avoid addresses that contain delivery/invoice address keywords
-            const headerText = lines.slice(0, Math.ceil(lines.length * 0.2)).join('\n');
+            // ===== SUPPLIER - IMPROVED =====
+            const headerLines = lines.slice(0, Math.min(15, Math.ceil(lines.length * 0.15)));
             let supplier = null;
             
-            // Pattern 1: Company name with legal suffix in header
-            const companyMatches = headerText.match(/([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,4}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))/gi);
+            // Exclude logo text and address keywords
+            const excludePatterns = /(?:THE ORIGINAL|INVOICE|ADDRESS|DELIVERY|FLOOR|BUILDING|STREET|ROAD|AVENUE|CITY|PARK|HILLS)/i;
             
-            if (companyMatches && companyMatches.length > 0) {
-                // Take the first company name that's NOT in an address block
-                for (const match of companyMatches) {
-                    const contextStart = headerText.indexOf(match) - 50;
-                    const contextEnd = headerText.indexOf(match) + match.length + 50;
-                    const context = headerText.substring(Math.max(0, contextStart), Math.min(headerText.length, contextEnd)).toLowerCase();
-                    
-                    // Skip if it's clearly in an address block (has address keywords nearby)
-                    if (!/(?:invoice\s+address|delivery\s+address|bill\s+to|ship\s+to)/i.test(context)) {
-                        supplier = match;
-                        break;
-                    }
+            // Strategy 1: Find company name with legal suffix on its own line
+            for (let i = 0; i < headerLines.length; i++) {
+                const line = headerLines[i];
+                
+                if (excludePatterns.test(line)) continue;
+                
+                const companyMatch = line.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))$/i);
+                if (companyMatch) {
+                    supplier = companyMatch[1];
+                    break;
                 }
             }
             
-            // Fallback: Look for capitalized company names in first 10 lines
+            // Strategy 2: Look for any company with legal suffix in early text
             if (!supplier) {
-                for (let i = 0; i < Math.min(10, lines.length); i++) {
-                    const line = lines[i];
-                    // Skip lines with address keywords
-                    if (/(?:address|floor|building|street|road|avenue|city)/i.test(line)) continue;
-                    
-                    const match = line.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){1,3})$/);
-                    if (match && match[1].length > 5) {
-                        supplier = match[1];
-                        break;
+                const companyPattern = /([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))/gi;
+                const textFirst30Percent = lines.slice(0, Math.ceil(lines.length * 0.3)).join('\n');
+                const matches = textFirst30Percent.match(companyPattern);
+                
+                if (matches && matches.length > 0) {
+                    for (const match of matches) {
+                        const idx = textFirst30Percent.indexOf(match);
+                        const context = textFirst30Percent.substring(
+                            Math.max(0, idx - 100), 
+                            Math.min(textFirst30Percent.length, idx + match.length + 100)
+                        );
+                        
+                        if (!/(?:invoice\s+address|delivery\s+address|bill\s+to|ship\s+to|floor|building|street|THE ORIGINAL)/i.test(context)) {
+                            supplier = match;
+                            break;
+                        }
                     }
                 }
             }
             
             invoice.supplier = supplier?.trim() || '';
             
-            // Extract amount - improved to find the correct invoice total
-            // Strategy: Look specifically for "Invoice amount" or final "Total"
+            // ===== AMOUNT - IMPROVED =====
             let amount = null;
             
-            // Pattern 1: Look for "Invoice amount" specifically
+            // Pattern 1: "Invoice amount" specifically
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 if (/^Invoice\s+amount$/i.test(line)) {
-                    // Next line or same line should have the amount
                     const amountMatch = line.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/) ||
                                        lines[i+1]?.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/);
                     if (amountMatch) {
@@ -289,7 +276,6 @@
                         break;
                     }
                 } else if (/Invoice\s+amount[:\s]/i.test(line)) {
-                    // Amount is on the same line after "Invoice amount:"
                     const amountMatch = line.match(/Invoice\s+amount[:\s]+([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/i);
                     if (amountMatch) {
                         amount = amountMatch[1];
@@ -298,51 +284,41 @@
                 }
             }
             
-            // Pattern 2: Look for line that has amount and currency together (bottom of invoice)
+            // Pattern 2: Amount + Currency at bottom (last 15 lines)
             if (!amount) {
-                for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
+                for (let i = lines.length - 1; i >= Math.max(0, lines.length - 15); i--) {
                     const line = lines[i];
-                    // Look for pattern like "26,827.20 EUR" or "EUR 26,827.20"
                     const match = line.match(/(?:EUR|USD|GBP|AED|SAR)\s+([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})|([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})\s+(?:EUR|USD|GBP|AED|SAR)/i);
-                    if (match) {
+                    if (match && !/(?:weight|volume|kg|ton|cubic|subtotal|vat|tax)/i.test(line)) {
                         amount = match[1] || match[2];
-                        // Make sure this is not a weight or volume
-                        if (!/(?:weight|volume|kg|ton|cubic)/i.test(line)) {
-                            break;
-                        }
+                        break;
                     }
                 }
             }
             
-            // Pattern 3: Look for "Total" in the bottom section
-            if (!amount) {
-                for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
-                    const line = lines[i];
-                    if (/^Total$/i.test(line) || /^Total\s+/i.test(line)) {
-                        const amountMatch = line.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/) ||
-                                           lines[i+1]?.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/);
-                        if (amountMatch) {
-                            // Verify this is not weight/volume
-                            const context = (lines[i-1] || '') + ' ' + line + ' ' + (lines[i+1] || '');
-                            if (!/(?:weight|volume|kg|ton|cubic|net|gross)/i.test(context)) {
-                                amount = amountMatch[1];
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            
+            // Normalize amount format
             if (amount) {
-                // Clean up: remove spaces, convert European format to US format
-                invoice.amount = amount.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+                // Detect format: European (26.827,20) vs US (26,827.20)
+                const hasCommaDecimal = /\d+,\d{2}$/.test(amount);
+                const hasDotDecimal = /\d+\.\d{2}$/.test(amount);
+                
+                if (hasCommaDecimal) {
+                    // European: Remove dots (thousands), replace comma with dot
+                    invoice.amount = amount.replace(/\./g, '').replace(/\s/g, '').replace(',', '.');
+                } else if (hasDotDecimal) {
+                    // US: Remove commas (thousands), keep dot
+                    invoice.amount = amount.replace(/,/g, '').replace(/\s/g, '');
+                } else {
+                    // Unknown: strip all separators except last one
+                    invoice.amount = amount.replace(/[,\s]/g, '');
+                }
             }
             
-            // Extract currency
+            // ===== CURRENCY =====
             const currency = text.match(/\b(EUR|USD|GBP|AED|SAR)\b/i)?.[1];
             invoice.currency = currency?.toUpperCase() || '';
             
-            // Extract invoice date (not due date)
+            // ===== DATE =====
             let dateMatch = null;
             for (let i = 0; i < lines.length; i++) {
                 if (/^Invoice\s+date$/i.test(lines[i])) {
@@ -372,7 +348,6 @@
                         month = parts[0].padStart(2, '0');
                         day = parts[1].padStart(2, '0');
                     } else {
-                        // Default DD/MM/YYYY
                         day = parts[0].padStart(2, '0');
                         month = parts[1].padStart(2, '0');
                     }
@@ -442,7 +417,6 @@
                 container.appendChild(div);
             });
             
-            // Add event listeners for field changes
             document.querySelectorAll('.invoice-field').forEach(field => {
                 field.addEventListener('change', (e) => {
                     const idx = parseInt(e.target.dataset.idx);

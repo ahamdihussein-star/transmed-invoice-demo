@@ -18,7 +18,8 @@ const sessions = new Map();
 // Auto-initialize DEMO session on server startup
 sessions.set('DEMO', {
   status: 'pending',
-  createdAt: new Date().toISOString()
+  createdAt: new Date().toISOString(),
+  invoices: [] // Support multiple invoices
 });
 console.log('✅ DEMO session initialized');
 
@@ -30,7 +31,8 @@ app.post('/api/invoice/new', (req, res) => {
   if (!sessions.has(sessionId)) {
     sessions.set(sessionId, {
       status: 'pending',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      invoices: []
     });
   }
   
@@ -41,7 +43,7 @@ app.post('/api/invoice/new', (req, res) => {
   });
 });
 
-// API 2: Get invoice data
+// API 2: Get invoice data - returns array of invoices
 app.get('/api/invoice/:sessionId', (req, res) => {
   const { sessionId } = req.params;
   const session = sessions.get(sessionId);
@@ -56,11 +58,13 @@ app.get('/api/invoice/:sessionId', (req, res) => {
   res.json({
     success: true,
     status: session.status,
-    data: session.data || null
+    data: session.data || null,
+    count: session.data?.count || 0,
+    invoices: session.data?.invoices || []
   });
 });
 
-// API 2.5: Update invoice data (from form submission)
+// API 2.5: Update invoice data (from form submission) - supports array of invoices
 app.put('/api/invoice/:sessionId', (req, res) => {
   const { sessionId } = req.params;
   const session = sessions.get(sessionId);
@@ -77,11 +81,11 @@ app.put('/api/invoice/:sessionId', (req, res) => {
   
   res.json({
     success: true,
-    message: 'Data saved successfully'
+    message: `${req.body.data.count || 1} invoice(s) saved successfully`
   });
 });
 
-// API 3: Finalize invoice
+// API 3: Finalize invoice - processes all invoices and returns array of references
 app.post('/api/invoice/:sessionId/finalize', (req, res) => {
   const { sessionId } = req.params;
   const session = sessions.get(sessionId);
@@ -93,15 +97,35 @@ app.post('/api/invoice/:sessionId/finalize', (req, res) => {
     });
   }
   
-  const invoiceRef = 'AP-2025-' + Math.floor(10000 + Math.random() * 90000);
+  if (!session.data || !session.data.invoices) {
+    return res.status(400).json({
+      success: false,
+      message: 'No invoices to finalize'
+    });
+  }
+  
+  // Generate reference numbers for all invoices
+  const references = session.data.invoices.map((inv, idx) => {
+    const ref = 'AP-2025-' + Math.floor(10000 + Math.random() * 90000);
+    return {
+      invoiceNumber: inv.invoice,
+      supplier: inv.supplier,
+      amount: inv.amount,
+      currency: inv.currency,
+      date: inv.date,
+      reference: ref
+    };
+  });
+  
   session.status = 'completed';
-  session.invoiceRef = invoiceRef;
+  session.references = references;
   session.completedAt = new Date().toISOString();
   
   res.json({
     success: true,
-    invoiceRef,
-    message: 'Invoice booked successfully'
+    count: references.length,
+    references: references,
+    message: `${references.length} invoice(s) booked successfully`
   });
 });
 

@@ -218,44 +218,48 @@
                                  text.match(/\b\d{10,15}\b/)?.[0] || '';
             }
             
-            // ===== SUPPLIER - IMPROVED =====
-            const headerLines = lines.slice(0, Math.min(15, Math.ceil(lines.length * 0.15)));
+            // ===== SUPPLIER - FINAL FIX =====
             let supplier = null;
             
-            // Exclude logo text and address keywords
-            const excludePatterns = /(?:THE ORIGINAL|INVOICE|ADDRESS|DELIVERY|FLOOR|BUILDING|STREET|ROAD|AVENUE|CITY|PARK|HILLS)/i;
+            // Strategy: Split text at "Invoice address" and search ONLY in the part before it
+            const invoiceAddressIndex = text.search(/Invoice\s+address/i);
+            const searchText = invoiceAddressIndex !== -1 ? text.substring(0, invoiceAddressIndex) : text;
+            const searchLines = searchText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
             
-            // Strategy 1: Find company name with legal suffix on its own line
+            // Take only first 20 lines from the text BEFORE "Invoice address"
+            const headerLines = searchLines.slice(0, Math.min(20, searchLines.length));
+            
+            // Exclude logo text and other noise
+            const excludePatterns = /(?:THE ORIGINAL|INVOICE\s*$|NUMBER|DATE|PAYMENT|DELIVERY|DUE|SALES|CUSTOMER|PAGE|ORIGINAL)/i;
+            
+            // Pattern 1: Company name with legal suffix on its own line
             for (let i = 0; i < headerLines.length; i++) {
                 const line = headerLines[i];
                 
+                // Skip excluded patterns
                 if (excludePatterns.test(line)) continue;
                 
+                // Look for company name with legal suffix (AB, LLC, etc.)
                 const companyMatch = line.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))$/i);
                 if (companyMatch) {
                     supplier = companyMatch[1];
+                    console.log('Found supplier (pattern 1):', supplier, 'at line', i);
                     break;
                 }
             }
             
-            // Strategy 2: Look for any company with legal suffix in early text
+            // Pattern 2: Company with legal suffix anywhere in line (less strict)
             if (!supplier) {
-                const companyPattern = /([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))/gi;
-                const textFirst30Percent = lines.slice(0, Math.ceil(lines.length * 0.3)).join('\n');
-                const matches = textFirst30Percent.match(companyPattern);
-                
-                if (matches && matches.length > 0) {
-                    for (const match of matches) {
-                        const idx = textFirst30Percent.indexOf(match);
-                        const context = textFirst30Percent.substring(
-                            Math.max(0, idx - 100), 
-                            Math.min(textFirst30Percent.length, idx + match.length + 100)
-                        );
-                        
-                        if (!/(?:invoice\s+address|delivery\s+address|bill\s+to|ship\s+to|floor|building|street|THE ORIGINAL)/i.test(context)) {
-                            supplier = match;
-                            break;
-                        }
+                for (let i = 0; i < headerLines.length; i++) {
+                    const line = headerLines[i];
+                    
+                    if (excludePatterns.test(line)) continue;
+                    
+                    const companyMatch = line.match(/([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))/i);
+                    if (companyMatch) {
+                        supplier = companyMatch[1];
+                        console.log('Found supplier (pattern 2):', supplier, 'at line', i);
+                        break;
                     }
                 }
             }

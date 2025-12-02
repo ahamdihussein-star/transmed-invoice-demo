@@ -45,6 +45,27 @@ app.get('/api/invoice/:sessionId', (req, res) => {
   });
 });
 
+// API 2.5: Update invoice data (from form submission)
+app.put('/api/invoice/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const session = sessions.get(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({
+      success: false,
+      message: 'Session not found'
+    });
+  }
+  
+  session.data = req.body.data;
+  session.status = 'submitted';
+  
+  res.json({
+    success: true,
+    message: 'Data saved successfully'
+  });
+});
+
 // API 3: Finalize invoice
 app.post('/api/invoice/:sessionId/finalize', (req, res) => {
   const { sessionId } = req.params;

@@ -26,22 +26,29 @@ app.use(express.json());
 /**
  * Determine supplier number based on business rules
  */
-function determineSupplierNumber(deliveredFrom, countryOfOrigin, brand) {
+function determineSupplierNumber(deliveredFrom, countryOfOrigin, supplierName) {
     const from = (deliveredFrom || '').toLowerCase().trim();
     const country = (countryOfOrigin || '').toLowerCase().trim();
-    const brandLower = (brand || '').toLowerCase().trim();
+    const name = (supplierName || '').toLowerCase().trim();
+
+    // Oatly rules
+    if (name.includes('oatly')) {
+        if (country.includes('sweden') || country.includes('malmö')) return 600001;
+        if (country.includes('netherlands') || country.includes('nld')) return 600002;
+        return 600000; // Default Oatly
+    }
 
     // Procter & Gamble rules
-    if (from.includes('procter')) {
+    if (name.includes('procter') || name.includes('p&g')) {
         if (country.includes('egypt')) return 400001;
         if (country.includes('saudi') || country.includes('bahrain')) return 400002;
-        if (brandLower.includes('vicks')) return 400003;
         return 400000; // Default P&G
     }
 
-    // Other suppliers
-    if (from.includes('nutricia')) return 500001;
-    if (from.includes('oatly')) return 600001;
+    // Nutricia rules
+    if (name.includes('nutricia')) {
+        return 500001;
+    }
 
     return 999999; // Unknown supplier
 }
@@ -51,12 +58,46 @@ function determineSupplierNumber(deliveredFrom, countryOfOrigin, brand) {
  */
 function convertDecimalFormat(value) {
     if (!value) return 0;
-    // Convert "1.234,56" to "1234.56"
-    return parseFloat(
-        value.toString()
-            .replace(/\./g, '')  // Remove thousand separators
-            .replace(/,/g, '.')  // Convert comma to period
-    ) || 0;
+    
+    const str = value.toString().trim();
+    
+    // Check if already a valid number (no separators)
+    if (!/[,\.]/.test(str)) {
+        return parseFloat(str) || 0;
+    }
+    
+    // Detect format based on comma and dot positions
+    const lastComma = str.lastIndexOf(',');
+    const lastDot = str.lastIndexOf('.');
+    
+    if (lastComma > lastDot) {
+        // European format: "26.827,20" or "26 827,20"
+        // Remove dots and spaces, replace comma with dot
+        return parseFloat(
+            str.replace(/\./g, '')
+               .replace(/\s/g, '')
+               .replace(',', '.')
+        ) || 0;
+    } else if (lastDot > lastComma) {
+        // US format: "26,827.20"
+        // Remove commas and spaces, keep dot
+        return parseFloat(
+            str.replace(/,/g, '')
+               .replace(/\s/g, '')
+        ) || 0;
+    } else {
+        // Only one separator - check which one
+        if (lastComma !== -1) {
+            // Has comma - could be "827,20" (European) or error
+            const parts = str.split(',');
+            if (parts[1] && parts[1].length === 2) {
+                // Likely European decimal: "827,20"
+                return parseFloat(str.replace(',', '.')) || 0;
+            }
+        }
+        // Fallback: remove all non-numeric except last dot/comma
+        return parseFloat(str.replace(/[^0-9.]/g, '')) || 0;
+    }
 }
 
 /**
@@ -76,15 +117,14 @@ function formatDate(date) {
 function transformInvoiceData(extractedData) {
     const delivered_from = extractedData.delivered_from || extractedData.Delivered_From || '';
     const country_oo = extractedData.country_of_origin || extractedData.Country_of_origin || '';
-    const brand = extractedData.brand || extractedData.Brand || '';
+    const supplier_name = extractedData.supplier_name || extractedData.Supplier_Name || '';
     const currency = extractedData.currency || extractedData.Currency || 'USD';
 
     return {
         invoice_number: extractedData.invoice_number || extractedData.invoice_number || 'N/A',
         delivered_from: delivered_from.trim(),
         country_oo: country_oo,
-        supplier_number: determineSupplierNumber(delivered_from, country_oo, brand),
-        brand: brand,
+        supplier_number: determineSupplierNumber(delivered_from, country_oo, supplier_name),
         invoice_date: extractedData.invoice_date || extractedData.Invoice_Date || new Date().toISOString(),
         gl_date: formatDate(new Date()),
         total_payable: convertDecimalFormat(extractedData.total_payable || extractedData.Total_Payable || 0),
@@ -95,7 +135,7 @@ function transformInvoiceData(extractedData) {
         tax_rate_area: '',
         tax_ex: '',
         exchange_rate: 1,
-        supplier_name: extractedData.supplier_name || extractedData.Supplier_Name || 'Unknown'
+        supplier_name: supplier_name
     };
 }
 
@@ -246,31 +286,51 @@ function parseNanonetsResponse(results) {
             const label = pred.label;
             const value = pred.ocr_text;
 
-            // Map Nanonets labels to our fields (trying all possible variations)
-            const labelLower = label?.toLowerCase() || '';
-            
-            if (labelLower.includes('invoice') && labelLower.includes('number')) {
-                invoice.invoice_number = value;
-            } else if (labelLower.includes('invoice') && labelLower.includes('date')) {
-                invoice.invoice_date = value;
-            } else if (labelLower.includes('supplier') || labelLower.includes('vendor') || labelLower === 'from') {
-                invoice.supplier_name = value;
-            } else if (labelLower.includes('total') || labelLower.includes('amount') || labelLower.includes('payable')) {
-                if (!invoice.total_payable) { // Take first total found
-                    invoice.total_payable = value;
-                }
-            } else if (labelLower.includes('price') && !labelLower.includes('unit')) {
-                invoice.total_price = value;
-            } else if (labelLower.includes('vat') || labelLower.includes('tax')) {
-                invoice.vat = value;
-            } else if (labelLower.includes('currency') || label === 'currency') {
-                invoice.currency = value;
-            } else if (labelLower.includes('delivered') || labelLower.includes('ship from')) {
-                invoice.delivered_from = value;
-            } else if (labelLower.includes('country') || labelLower.includes('origin')) {
-                invoice.country_of_origin = value;
-            } else if (labelLower.includes('brand')) {
-                invoice.brand = value;
+            // Direct mapping for known Nanonets labels
+            switch (label) {
+                case 'invoice_number':
+                    invoice.invoice_number = value;
+                    break;
+                case 'invoice_date':
+                    invoice.invoice_date = value;
+                    break;
+                case 'seller_name':
+                    invoice.supplier_name = value;
+                    break;
+                case 'invoice_amount':
+                case 'total_due_amount':
+                    if (!invoice.total_payable) {
+                        invoice.total_payable = value;
+                    }
+                    break;
+                case 'subtotal':
+                    if (!invoice.total_price) {
+                        invoice.total_price = value;
+                    }
+                    break;
+                case 'total_tax':
+                    invoice.vat = value;
+                    break;
+                case 'total_tax_percentage':
+                    if (!invoice.vat) {
+                        invoice.vat = value;
+                    }
+                    break;
+                case 'currency':
+                    invoice.currency = value;
+                    break;
+                case 'seller_address':
+                    // Extract country from address (e.g., "Sweden" from "BOX 588\n201 25\nMalmö\nSweden")
+                    if (value && value.includes('\n')) {
+                        const lines = value.split('\n').map(l => l.trim()).filter(l => l);
+                        const lastLine = lines[lines.length - 1];
+                        // Last line is usually the country
+                        invoice.country_of_origin = lastLine;
+                        invoice.delivered_from = lastLine;
+                    } else {
+                        invoice.delivered_from = value;
+                    }
+                    break;
             }
         }
 

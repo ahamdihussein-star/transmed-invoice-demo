@@ -220,65 +220,71 @@ async function extractWithNanonets(filePath) {
 function parseNanonetsResponse(results) {
     const invoices = [];
 
+    console.log('\n═════════════════════════════════════════');
+    console.log('📊 NANONETS RESPONSE DEBUG');
+    console.log('═════════════════════════════════════════');
+    console.log('Total results:', results.length);
+
     // Nanonets returns array of predictions
-    for (const result of results) {
+    for (let r = 0; r < results.length; r++) {
+        const result = results[r];
         const predictions = result.prediction || [];
+        
+        console.log(`\n--- Result #${r + 1} ---`);
+        console.log('Predictions count:', predictions.length);
+        
         const invoice = {};
+
+        // LOG ALL LABELS to see what Nanonets actually returns
+        console.log('\nAvailable labels:');
+        predictions.forEach((pred, i) => {
+            console.log(`  [${i}] label: "${pred.label}" = "${pred.ocr_text?.substring(0, 50)}..."`);
+        });
 
         // Extract fields from predictions
         for (const pred of predictions) {
             const label = pred.label;
             const value = pred.ocr_text;
 
-            // Map Nanonets labels to our fields
-            switch (label) {
-                case 'invoice_number':
-                case 'Invoice_Number':
-                    invoice.invoice_number = value;
-                    break;
-                case 'invoice_date':
-                case 'Invoice_Date':
-                    invoice.invoice_date = value;
-                    break;
-                case 'supplier_name':
-                case 'Supplier_Name':
-                    invoice.supplier_name = value;
-                    break;
-                case 'total_payable':
-                case 'Total_Payable':
+            // Map Nanonets labels to our fields (trying all possible variations)
+            const labelLower = label?.toLowerCase() || '';
+            
+            if (labelLower.includes('invoice') && labelLower.includes('number')) {
+                invoice.invoice_number = value;
+            } else if (labelLower.includes('invoice') && labelLower.includes('date')) {
+                invoice.invoice_date = value;
+            } else if (labelLower.includes('supplier') || labelLower.includes('vendor') || labelLower === 'from') {
+                invoice.supplier_name = value;
+            } else if (labelLower.includes('total') || labelLower.includes('amount') || labelLower.includes('payable')) {
+                if (!invoice.total_payable) { // Take first total found
                     invoice.total_payable = value;
-                    break;
-                case 'total_price':
-                case 'Total_Price':
-                    invoice.total_price = value;
-                    break;
-                case 'vat':
-                case 'VAT_Amount':
-                    invoice.vat = value;
-                    break;
-                case 'currency':
-                case 'Currency':
-                    invoice.currency = value;
-                    break;
-                case 'delivered_from':
-                case 'Delivered_From':
-                    invoice.delivered_from = value;
-                    break;
-                case 'country_of_origin':
-                case 'Country_of_origin':
-                    invoice.country_of_origin = value;
-                    break;
-                case 'brand':
-                case 'Brand':
-                    invoice.brand = value;
-                    break;
+                }
+            } else if (labelLower.includes('price') && !labelLower.includes('unit')) {
+                invoice.total_price = value;
+            } else if (labelLower.includes('vat') || labelLower.includes('tax')) {
+                invoice.vat = value;
+            } else if (labelLower.includes('currency') || label === 'currency') {
+                invoice.currency = value;
+            } else if (labelLower.includes('delivered') || labelLower.includes('ship from')) {
+                invoice.delivered_from = value;
+            } else if (labelLower.includes('country') || labelLower.includes('origin')) {
+                invoice.country_of_origin = value;
+            } else if (labelLower.includes('brand')) {
+                invoice.brand = value;
             }
         }
+
+        console.log('\n📦 Extracted invoice:');
+        console.log(JSON.stringify(invoice, null, 2));
 
         if (Object.keys(invoice).length > 0) {
             invoices.push(invoice);
         }
     }
+
+    console.log('\n═════════════════════════════════════════');
+    console.log(`✅ Final invoices count: ${invoices.length}`);
+    console.log('═════════════════════════════════════════\n');
 
     return invoices;
 }

@@ -344,6 +344,30 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 });
 
 /**
+ * Update invoice data (after user review)
+ */
+app.put('/api/invoice/:sessionId', express.json(), (req, res) => {
+    const { sessionId } = req.params;
+    const { data } = req.body;
+
+    if (!sessions[sessionId]) {
+        sessions[sessionId] = {};
+    }
+
+    // Update with user-edited data
+    if (data && data.invoices) {
+        sessions[sessionId].invoices = data.invoices;
+        sessions[sessionId].status = data.status || 'updated';
+        sessions[sessionId].updated_at = new Date().toISOString();
+    }
+
+    res.json({
+        success: true,
+        message: 'Invoice data updated successfully'
+    });
+});
+
+/**
  * Get invoice data (for Boomi Agent)
  */
 app.get('/api/invoice/:sessionId', async (req, res) => {

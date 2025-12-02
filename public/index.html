@@ -121,12 +121,31 @@
             formData.append('apikey', OCR_KEY);
             formData.append('language', 'eng');
             formData.append('OCREngine', '2');
+            formData.append('isTable', 'true'); // Better structure detection
 
             try {
                 const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: formData });
                 const json = await res.json();
-                if (json.ParsedResults?.[0]) {
-                    extractMultipleInvoices(json.ParsedResults[0].ParsedText);
+                
+                console.log('OCR Response:', json); // Debug logging
+                
+                if (json.ParsedResults && json.ParsedResults.length > 0) {
+                    // Check if multiple pages were processed
+                    if (json.ParsedResults.length > 1) {
+                        // Multiple pages returned - process each separately
+                        console.log('Multiple pages detected:', json.ParsedResults.length);
+                        invoices = json.ParsedResults.map(result => 
+                            extractSingleInvoice(result.ParsedText)
+                        ).filter(inv => inv.invoice && inv.invoice.length >= 10);
+                    } else {
+                        // Single result - might contain multiple invoices
+                        const fullText = json.ParsedResults[0].ParsedText;
+                        console.log('Text length:', fullText.length);
+                        extractMultipleInvoices(fullText);
+                    }
+                    
+                    showExtracted();
+                    renderInvoicesForReview();
                 }
             } catch (err) {
                 console.error('OCR error:', err);
@@ -136,52 +155,66 @@
         }
 
         function extractMultipleInvoices(text) {
-            // Split text into individual invoices based on "Number" keyword followed by long number
-            const lines = text.split('\n');
-            let invoiceSections = [];
-            let currentSection = [];
+            // Strategy 1: Find all invoice numbers using regex
+            const invoicePattern = /\b(301060005\d{4}|301060006\d{4}|301060007\d{4})\b/g;
+            let matches = [];
+            let match;
             
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                
-                // Detect start of new invoice: "Number" followed by 10+ digit number
-                if (/^Number$/i.test(line) && lines[i+1]?.match(/^\d{10,15}$/)) {
-                    // Save previous section if exists
-                    if (currentSection.length > 0) {
-                        invoiceSections.push(currentSection.join('\n'));
-                    }
-                    // Start new section
-                    currentSection = [line];
-                } else {
-                    currentSection.push(line);
+            // Find all invoice numbers and their positions
+            while ((match = invoicePattern.exec(text)) !== null) {
+                matches.push({
+                    number: match[1],
+                    index: match.index
+                });
+            }
+            
+            console.log('Found invoice numbers:', matches.length);
+            
+            if (matches.length === 0) {
+                // Fallback: Try to find any 13-digit number
+                const genericPattern = /\b\d{13}\b/g;
+                while ((match = genericPattern.exec(text)) !== null) {
+                    matches.push({
+                        number: match[0],
+                        index: match.index
+                    });
                 }
+                console.log('Fallback: Found numbers:', matches.length);
             }
             
-            // Add last section
-            if (currentSection.length > 0) {
-                invoiceSections.push(currentSection.join('\n'));
+            if (matches.length === 0) {
+                // No invoice numbers found, treat entire text as one invoice
+                invoices = [extractSingleInvoice(text)];
+            } else if (matches.length === 1) {
+                // Only one invoice found
+                invoices = [extractSingleInvoice(text)];
+            } else {
+                // Multiple invoices found - split text at each invoice number
+                let sections = [];
+                for (let i = 0; i < matches.length; i++) {
+                    const start = matches[i].index;
+                    const end = i < matches.length - 1 ? matches[i + 1].index : text.length;
+                    const section = text.substring(start, end);
+                    sections.push(section);
+                }
+                
+                console.log('Split into sections:', sections.length);
+                
+                // Extract data from each section
+                invoices = sections.map(section => extractSingleInvoice(section));
             }
             
-            // If no clear sections found, treat entire text as one invoice
-            if (invoiceSections.length === 0) {
-                invoiceSections = [text];
-            }
-            
-            // Extract data from each invoice section
-            invoices = invoiceSections.map(section => extractSingleInvoice(section));
-            
-            // Filter out invalid invoices (no invoice number found)
+            // Filter out invalid invoices
             invoices = invoices.filter(inv => inv.invoice && inv.invoice.length >= 10);
             
-            showExtracted();
-            renderInvoicesForReview();
+            console.log('Final invoices count:', invoices.length);
         }
 
         function extractSingleInvoice(text) {
             const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
             let invoice = { invoice: '', supplier: '', amount: '', currency: '', date: '' };
             
-            // Extract invoice number
+            // Extract invoice number - try multiple patterns
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 if (/(?:number|invoice)/i.test(line)) {
@@ -194,7 +227,9 @@
                 }
             }
             if (!invoice.invoice) {
-                invoice.invoice = text.match(/\b\d{10,15}\b/)?.[0] || '';
+                // Fallback: find first 13-digit number
+                invoice.invoice = text.match(/\b\d{13}\b/)?.[0] || 
+                                 text.match(/\b\d{10,15}\b/)?.[0] || '';
             }
             
             // Extract supplier

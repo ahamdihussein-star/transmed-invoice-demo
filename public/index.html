@@ -17,7 +17,7 @@
         <!-- Header -->
         <div class="text-center mb-8">
             <h1 class="text-4xl font-bold text-white mb-2">📄 Transmed Invoice Upload</h1>
-            <p class="text-blue-200">Session: <span id="session-id" class="font-mono"></span></p>
+            <p class="text-blue-200">Powered by Nanonets AI • Session: <span id="session-id" class="font-mono"></span></p>
         </div>
 
         <!-- Progress Steps -->
@@ -33,7 +33,7 @@
         <div id="step1" class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 shadow-2xl animate-fadeIn">
             <div class="text-center mb-6">
                 <h2 class="text-2xl font-bold text-white mb-2">📤 Upload Invoice(s)</h2>
-                <p class="text-blue-200">Upload your invoice PDF - supports multiple invoices in one file</p>
+                <p class="text-blue-200">Upload your invoice PDF - Nanonets AI will extract all data automatically</p>
             </div>
 
             <div class="mb-6">
@@ -46,17 +46,23 @@
 
             <div id="ocr-status" class="text-center py-4 hidden">
                 <span class="spinner mr-2"></span>
-                <span class="text-cyan-400">Extracting data from invoice(s)...</span>
+                <span class="text-cyan-400">Processing with Nanonets AI OCR...</span>
+                <p class="text-white/60 text-xs mt-2">This may take 10-30 seconds</p>
+            </div>
+
+            <div id="error-box" class="bg-red-500/10 border border-red-500/30 rounded-xl p-4 hidden">
+                <p class="text-red-400 font-medium mb-2">❌ Error:</p>
+                <p id="error-message" class="text-white/80 text-sm"></p>
             </div>
 
             <div id="extracted-box" class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 hidden">
-                <p class="text-emerald-400 font-medium mb-3">✓ Invoices Extracted:</p>
+                <p class="text-emerald-400 font-medium mb-3">✓ Invoices Extracted with Nanonets:</p>
                 <div id="invoice-count" class="text-white/80 text-sm mb-2"></div>
-                <div id="extracted-text" class="text-white/80 text-sm space-y-2 max-h-48 overflow-y-auto"></div>
+                <div id="extracted-summary" class="text-white/80 text-sm space-y-2 max-h-48 overflow-y-auto"></div>
             </div>
 
             <button id="step1-btn" onclick="goToStep(2)" disabled class="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl disabled:opacity-50 transition-all mt-6">
-                Continue →
+                Continue to Review →
             </button>
         </div>
 
@@ -64,7 +70,7 @@
         <div id="step2" class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 shadow-2xl animate-fadeIn hidden">
             <div class="text-center mb-6">
                 <h2 class="text-2xl font-bold text-white mb-2">✏️ Review All Invoices</h2>
-                <p class="text-blue-200">Verify extracted information for all invoices</p>
+                <p class="text-blue-200">Verify and edit extracted information</p>
             </div>
 
             <div id="invoices-container" class="space-y-4 max-h-96 overflow-y-auto mb-6">
@@ -73,7 +79,7 @@
 
             <div class="flex gap-3">
                 <button onclick="goToStep(1)" class="flex-1 py-4 bg-white/10 text-white font-semibold rounded-xl">← Back</button>
-                <button onclick="submitData()" class="flex-1 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl">Submit All</button>
+                <button onclick="submitData()" class="flex-1 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold rounded-xl">Submit All Invoices</button>
             </div>
         </div>
 
@@ -81,13 +87,20 @@
         <div id="step3" class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 shadow-2xl animate-fadeIn hidden text-center">
             <div class="text-6xl mb-4">✅</div>
             <h2 class="text-2xl font-bold text-white mb-4">Upload Complete!</h2>
-            <p class="text-blue-200 mb-2"><span id="success-count"></span> invoice(s) uploaded successfully.</p>
-            <p class="text-white/60 text-sm">Return to chat and type <span class="font-mono bg-white/10 px-2 py-1 rounded">"done"</span></p>
+            <p class="text-blue-200 mb-2"><span id="success-count"></span> invoice(s) processed successfully.</p>
+            <p class="text-white/60 text-sm mb-4">Data has been extracted and is ready for booking.</p>
+            <div class="bg-white/5 rounded-lg p-4 text-left">
+                <p class="text-white/80 text-sm">📝 <strong>Next Steps:</strong></p>
+                <ol class="text-white/60 text-sm mt-2 space-y-1 list-decimal list-inside">
+                    <li>Return to Boomi Agent chat</li>
+                    <li>Type <span class="font-mono bg-white/10 px-2 py-1 rounded">"done"</span></li>
+                    <li>Agent will retrieve and process the invoices</li>
+                </ol>
+            </div>
         </div>
     </div>
 
     <script>
-        const OCR_KEY = 'K85947283488957';
         const API_BASE = window.location.origin;
         
         let sessionId = 'DEMO';
@@ -95,8 +108,9 @@
         let invoices = [];
 
         function init() {
-            sessionId = 'DEMO';
-            history.pushState({}, '', `/upload/${sessionId}`);
+            const pathParts = window.location.pathname.split('/');
+            sessionId = pathParts[pathParts.length - 1] || 'DEMO';
+            
             document.getElementById('session-id').textContent = sessionId;
             document.getElementById('invoice-input').onchange = handleFile;
         }
@@ -109,274 +123,99 @@
             box.innerHTML = `<span class="text-cyan-400">✓ ${file.name}</span>`;
             box.classList.add('border-cyan-500', 'bg-cyan-500/10');
             
-            runOCR(file);
-            document.getElementById('step1-btn').disabled = false;
+            uploadAndExtract(file);
         }
 
-        async function runOCR(file) {
+        async function uploadAndExtract(file) {
+            // Hide any previous messages
+            document.getElementById('error-box').classList.add('hidden');
+            document.getElementById('extracted-box').classList.add('hidden');
+            document.getElementById('step1-btn').disabled = true;
+            
+            // Show loading
             document.getElementById('ocr-status').classList.remove('hidden');
             
             const formData = new FormData();
             formData.append('file', file);
-            formData.append('apikey', OCR_KEY);
-            formData.append('language', 'eng');
-            formData.append('OCREngine', '2');
-            formData.append('isTable', 'true');
+            formData.append('sessionId', sessionId);
 
             try {
-                const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: formData });
-                const json = await res.json();
+                console.log('📤 Uploading to backend...');
                 
-                console.log('OCR Response:', json);
-                
-                if (json.ParsedResults && json.ParsedResults.length > 0) {
-                    if (json.ParsedResults.length > 1) {
-                        console.log('Multiple pages detected:', json.ParsedResults.length);
-                        invoices = json.ParsedResults.map(result => 
-                            extractSingleInvoice(result.ParsedText)
-                        ).filter(inv => inv.invoice && inv.invoice.length >= 10);
-                    } else {
-                        const fullText = json.ParsedResults[0].ParsedText;
-                        console.log('Text length:', fullText.length);
-                        extractMultipleInvoices(fullText);
-                    }
-                    
-                    showExtracted();
-                    renderInvoicesForReview();
-                }
-            } catch (err) {
-                console.error('OCR error:', err);
-            }
-            
-            document.getElementById('ocr-status').classList.add('hidden');
-        }
-
-        function extractMultipleInvoices(text) {
-            const invoicePattern = /\b(301060005\d{4}|301060006\d{4}|301060007\d{4})\b/g;
-            let matches = [];
-            let match;
-            
-            while ((match = invoicePattern.exec(text)) !== null) {
-                matches.push({
-                    number: match[1],
-                    index: match.index
+                const response = await fetch(`${API_BASE}/api/upload`, {
+                    method: 'POST',
+                    body: formData
                 });
-            }
-            
-            console.log('Found invoice numbers:', matches.length);
-            
-            if (matches.length === 0) {
-                const genericPattern = /\b\d{13}\b/g;
-                while ((match = genericPattern.exec(text)) !== null) {
-                    matches.push({
-                        number: match[0],
-                        index: match.index
-                    });
-                }
-                console.log('Fallback: Found numbers:', matches.length);
-            }
-            
-            if (matches.length === 0) {
-                invoices = [extractSingleInvoice(text)];
-            } else if (matches.length === 1) {
-                invoices = [extractSingleInvoice(text)];
-            } else {
-                let sections = [];
-                for (let i = 0; i < matches.length; i++) {
-                    const start = matches[i].index;
-                    const end = i < matches.length - 1 ? matches[i + 1].index : text.length;
-                    const section = text.substring(start, end);
-                    sections.push(section);
-                }
-                
-                console.log('Split into sections:', sections.length);
-                invoices = sections.map(section => extractSingleInvoice(section));
-            }
-            
-            invoices = invoices.filter(inv => inv.invoice && inv.invoice.length >= 10);
-            console.log('Final invoices count:', invoices.length);
-        }
 
-        function extractSingleInvoice(text) {
-            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            let invoice = { invoice: '', supplier: '', amount: '', currency: '', date: '' };
-            
-            // ===== INVOICE NUMBER =====
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                if (/(?:number|invoice)/i.test(line)) {
-                    const numberMatch = line.match(/\b\d{10,15}\b/) || 
-                                       lines[i+1]?.match(/\b\d{10,15}\b/);
-                    if (numberMatch) {
-                        invoice.invoice = numberMatch[0];
-                        break;
-                    }
-                }
-            }
-            if (!invoice.invoice) {
-                invoice.invoice = text.match(/\b\d{13}\b/)?.[0] || 
-                                 text.match(/\b\d{10,15}\b/)?.[0] || '';
-            }
-            
-            // ===== SUPPLIER - FINAL FIX =====
-            let supplier = null;
-            
-            // Strategy: Split text at "Invoice address" and search ONLY in the part before it
-            const invoiceAddressIndex = text.search(/Invoice\s+address/i);
-            const searchText = invoiceAddressIndex !== -1 ? text.substring(0, invoiceAddressIndex) : text;
-            const searchLines = searchText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            
-            // Take only first 20 lines from the text BEFORE "Invoice address"
-            const headerLines = searchLines.slice(0, Math.min(20, searchLines.length));
-            
-            // Exclude logo text and other noise
-            const excludePatterns = /(?:THE ORIGINAL|INVOICE\s*$|NUMBER|DATE|PAYMENT|DELIVERY|DUE|SALES|CUSTOMER|PAGE|ORIGINAL)/i;
-            
-            // Pattern 1: Company name with legal suffix on its own line
-            for (let i = 0; i < headerLines.length; i++) {
-                const line = headerLines[i];
+                console.log('Response status:', response.status);
                 
-                // Skip excluded patterns
-                if (excludePatterns.test(line)) continue;
-                
-                // Look for company name with legal suffix (AB, LLC, etc.)
-                const companyMatch = line.match(/^([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))$/i);
-                if (companyMatch) {
-                    supplier = companyMatch[1];
-                    console.log('Found supplier (pattern 1):', supplier, 'at line', i);
-                    break;
-                }
-            }
-            
-            // Pattern 2: Company with legal suffix anywhere in line (less strict)
-            if (!supplier) {
-                for (let i = 0; i < headerLines.length; i++) {
-                    const line = headerLines[i];
+                const result = await response.json();
+                console.log('📥 Backend response:', result);
+
+                if (response.ok && result.success) {
+                    invoices = result.invoices || [];
                     
-                    if (excludePatterns.test(line)) continue;
+                    console.log(`✅ Extracted ${invoices.length} invoice(s)`);
                     
-                    const companyMatch = line.match(/([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,3}\s+(?:AB|EMEA|LLC|LTD|LIMITED|INC|INCORPORATED|S\.A\.|GMBH|PLC|CORP))/i);
-                    if (companyMatch) {
-                        supplier = companyMatch[1];
-                        console.log('Found supplier (pattern 2):', supplier, 'at line', i);
-                        break;
-                    }
-                }
-            }
-            
-            invoice.supplier = supplier?.trim() || '';
-            
-            // ===== AMOUNT - IMPROVED =====
-            let amount = null;
-            
-            // Pattern 1: "Invoice amount" specifically
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-                if (/^Invoice\s+amount$/i.test(line)) {
-                    const amountMatch = line.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/) ||
-                                       lines[i+1]?.match(/([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/);
-                    if (amountMatch) {
-                        amount = amountMatch[1];
-                        break;
-                    }
-                } else if (/Invoice\s+amount[:\s]/i.test(line)) {
-                    const amountMatch = line.match(/Invoice\s+amount[:\s]+([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})/i);
-                    if (amountMatch) {
-                        amount = amountMatch[1];
-                        break;
-                    }
-                }
-            }
-            
-            // Pattern 2: Amount + Currency at bottom (last 15 lines)
-            if (!amount) {
-                for (let i = lines.length - 1; i >= Math.max(0, lines.length - 15); i--) {
-                    const line = lines[i];
-                    const match = line.match(/(?:EUR|USD|GBP|AED|SAR)\s+([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})|([0-9]{1,3}(?:[,\s]\d{3})*[,\.]\d{2})\s+(?:EUR|USD|GBP|AED|SAR)/i);
-                    if (match && !/(?:weight|volume|kg|ton|cubic|subtotal|vat|tax)/i.test(line)) {
-                        amount = match[1] || match[2];
-                        break;
-                    }
-                }
-            }
-            
-            // Normalize amount format
-            if (amount) {
-                // Detect format: European (26.827,20) vs US (26,827.20)
-                const hasCommaDecimal = /\d+,\d{2}$/.test(amount);
-                const hasDotDecimal = /\d+\.\d{2}$/.test(amount);
-                
-                if (hasCommaDecimal) {
-                    // European: Remove dots (thousands), replace comma with dot
-                    invoice.amount = amount.replace(/\./g, '').replace(/\s/g, '').replace(',', '.');
-                } else if (hasDotDecimal) {
-                    // US: Remove commas (thousands), keep dot
-                    invoice.amount = amount.replace(/,/g, '').replace(/\s/g, '');
+                    showExtractedSummary();
+                    renderInvoicesForReview();
+                    
+                    document.getElementById('step1-btn').disabled = false;
                 } else {
-                    // Unknown: strip all separators except last one
-                    invoice.amount = amount.replace(/[,\s]/g, '');
+                    showError(result.message || result.error || 'Failed to extract invoice data');
                 }
+
+            } catch (error) {
+                console.error('❌ Upload error:', error);
+                showError(`Network error: ${error.message}`);
+            } finally {
+                document.getElementById('ocr-status').classList.add('hidden');
             }
-            
-            // ===== CURRENCY =====
-            const currency = text.match(/\b(EUR|USD|GBP|AED|SAR)\b/i)?.[1];
-            invoice.currency = currency?.toUpperCase() || '';
-            
-            // ===== DATE =====
-            let dateMatch = null;
-            for (let i = 0; i < lines.length; i++) {
-                if (/^Invoice\s+date$/i.test(lines[i])) {
-                    dateMatch = lines[i+1]?.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
-                    if (dateMatch) break;
-                } else if (/Invoice\s+date[:\s]/i.test(lines[i])) {
-                    dateMatch = lines[i].match(/Invoice\s+date[:\s]+(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i);
-                    if (dateMatch) {
-                        dateMatch = [dateMatch[0], dateMatch[1]];
-                        break;
-                    }
-                }
-            }
-            
-            if (dateMatch) {
-                const dateStr = dateMatch[1];
-                const parts = dateStr.split(/[\/\-\.]/);
-                if (parts.length === 3 && parts[2].length === 4) {
-                    const first = parseInt(parts[0]);
-                    const second = parseInt(parts[1]);
-                    let day, month, year = parts[2];
-                    
-                    if (first > 12) {
-                        day = parts[0].padStart(2, '0');
-                        month = parts[1].padStart(2, '0');
-                    } else if (second > 12) {
-                        month = parts[0].padStart(2, '0');
-                        day = parts[1].padStart(2, '0');
-                    } else {
-                        day = parts[0].padStart(2, '0');
-                        month = parts[1].padStart(2, '0');
-                    }
-                    
-                    invoice.date = `${year}-${month}-${day}`;
-                }
-            }
-            
-            return invoice;
         }
 
-        function showExtracted() {
+        function showError(message) {
+            const errorBox = document.getElementById('error-box');
+            const errorMsg = document.getElementById('error-message');
+            
+            errorMsg.textContent = message;
+            errorBox.classList.remove('hidden');
+            
+            // Reset upload box
+            const box = document.getElementById('invoice-box');
+            box.innerHTML = `<span class="text-5xl block mb-2">📄</span>
+                            <span class="text-white/60">Tap to upload invoice PDF or image</span>`;
+            box.classList.remove('border-cyan-500', 'bg-cyan-500/10');
+        }
+
+        function showExtractedSummary() {
             const box = document.getElementById('extracted-box');
             const countEl = document.getElementById('invoice-count');
-            const txt = document.getElementById('extracted-text');
+            const summaryEl = document.getElementById('extracted-summary');
             
             if (invoices.length > 0) {
-                countEl.textContent = `Found ${invoices.length} invoice(s)`;
+                countEl.textContent = `✓ Successfully extracted ${invoices.length} invoice(s)`;
+                
                 let html = '';
                 invoices.forEach((inv, idx) => {
-                    html += `<div class="p-2 bg-white/5 rounded">
-                        <strong>Invoice ${idx + 1}:</strong> ${inv.invoice} - ${inv.supplier} - ${inv.amount} ${inv.currency}
+                    html += `<div class="p-3 bg-white/5 rounded-lg border border-white/10">
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1">
+                                <p class="text-white font-medium">#${idx + 1}: ${inv.invoice_number || 'N/A'}</p>
+                                <p class="text-white/60 text-xs mt-1">
+                                    ${inv.supplier_name || 'Unknown Supplier'} • 
+                                    ${inv.total_payable || '0'} ${inv.currency || 'USD'}
+                                </p>
+                            </div>
+                            <div class="ml-2">
+                                <span class="inline-block px-2 py-1 bg-emerald-500/20 text-emerald-400 text-xs rounded">
+                                    Supplier #${inv.supplier_number || '999999'}
+                                </span>
+                            </div>
+                        </div>
                     </div>`;
                 });
-                txt.innerHTML = html;
+                
+                summaryEl.innerHTML = html;
                 box.classList.remove('hidden');
             }
         }
@@ -387,78 +226,144 @@
             
             invoices.forEach((inv, idx) => {
                 const div = document.createElement('div');
-                div.className = 'bg-white/5 rounded-xl p-4 border border-white/10';
+                div.className = 'bg-white/5 rounded-xl p-5 border border-white/10';
                 div.innerHTML = `
-                    <h3 class="text-white font-semibold mb-3">Invoice #${idx + 1}</h3>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-xs text-white/60 mb-1">Invoice Number</label>
-                            <input type="text" value="${inv.invoice}" data-idx="${idx}" data-field="invoice"
-                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-white/60 mb-1">Supplier</label>
-                            <input type="text" value="${inv.supplier}" data-idx="${idx}" data-field="supplier"
-                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-white/60 mb-1">Amount</label>
-                            <input type="text" value="${inv.amount}" data-idx="${idx}" data-field="amount"
-                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
-                        </div>
-                        <div>
-                            <label class="block text-xs text-white/60 mb-1">Currency</label>
-                            <input type="text" value="${inv.currency}" data-idx="${idx}" data-field="currency"
-                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
-                        </div>
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-white font-semibold text-lg">Invoice #${idx + 1}</h3>
+                        <span class="px-3 py-1 bg-cyan-500/20 text-cyan-400 text-sm rounded-full">
+                            Supplier #${inv.supplier_number || '999999'}
+                        </span>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
                         <div class="col-span-2">
-                            <label class="block text-xs text-white/60 mb-1">Invoice Date</label>
-                            <input type="date" value="${inv.date}" data-idx="${idx}" data-field="date"
-                                   class="invoice-field w-full px-3 py-2 bg-white/10 border border-white/20 rounded text-white text-sm">
+                            <label class="block text-xs text-white/60 mb-1.5">Invoice Number</label>
+                            <input type="text" value="${inv.invoice_number || ''}" data-idx="${idx}" data-field="invoice_number"
+                                   class="invoice-field w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:border-cyan-500 focus:outline-none">
+                        </div>
+                        
+                        <div class="col-span-2">
+                            <label class="block text-xs text-white/60 mb-1.5">Supplier Name</label>
+                            <input type="text" value="${inv.supplier_name || ''}" data-idx="${idx}" data-field="supplier_name"
+                                   class="invoice-field w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:border-cyan-500 focus:outline-none">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1.5">Delivered From</label>
+                            <input type="text" value="${inv.delivered_from || ''}" data-idx="${idx}" data-field="delivered_from"
+                                   class="invoice-field w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:border-cyan-500 focus:outline-none">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1.5">Country of Origin</label>
+                            <input type="text" value="${inv.country_oo || ''}" data-idx="${idx}" data-field="country_oo"
+                                   class="invoice-field w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:border-cyan-500 focus:outline-none">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1.5">Total Payable</label>
+                            <input type="text" value="${inv.total_payable || ''}" data-idx="${idx}" data-field="total_payable"
+                                   class="invoice-field w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:border-cyan-500 focus:outline-none">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1.5">Currency</label>
+                            <select data-idx="${idx}" data-field="currency"
+                                    class="invoice-field w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:border-cyan-500 focus:outline-none">
+                                <option value="USD" ${inv.currency === 'USD' ? 'selected' : ''}>USD</option>
+                                <option value="EUR" ${inv.currency === 'EUR' ? 'selected' : ''}>EUR</option>
+                                <option value="AED" ${inv.currency === 'AED' ? 'selected' : ''}>AED</option>
+                                <option value="SAR" ${inv.currency === 'SAR' ? 'selected' : ''}>SAR</option>
+                                <option value="GBP" ${inv.currency === 'GBP' ? 'selected' : ''}>GBP</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1.5">VAT Amount</label>
+                            <input type="text" value="${inv.vat || '0'}" data-idx="${idx}" data-field="vat"
+                                   class="invoice-field w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:border-cyan-500 focus:outline-none">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs text-white/60 mb-1.5">Invoice Date</label>
+                            <input type="text" value="${inv.invoice_date || ''}" data-idx="${idx}" data-field="invoice_date"
+                                   placeholder="YYYY-MM-DD"
+                                   class="invoice-field w-full px-3 py-2.5 bg-white/10 border border-white/20 rounded-lg text-white text-sm focus:border-cyan-500 focus:outline-none">
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 p-3 bg-white/5 rounded-lg">
+                        <p class="text-xs text-white/60 mb-2">Calculated Fields:</p>
+                        <div class="grid grid-cols-3 gap-3 text-xs">
+                            <div>
+                                <span class="text-white/60">Tax Rate Area:</span>
+                                <span class="text-white ml-1">${inv.tax_rate_area || 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-white/60">Tax Ex:</span>
+                                <span class="text-white ml-1">${inv.tax_ex || 'N/A'}</span>
+                            </div>
+                            <div>
+                                <span class="text-white/60">GL Date:</span>
+                                <span class="text-white ml-1">${inv.gl_date || 'N/A'}</span>
+                            </div>
                         </div>
                     </div>
                 `;
                 container.appendChild(div);
             });
             
+            // Add event listeners for field updates
             document.querySelectorAll('.invoice-field').forEach(field => {
                 field.addEventListener('change', (e) => {
                     const idx = parseInt(e.target.dataset.idx);
                     const fieldName = e.target.dataset.field;
                     invoices[idx][fieldName] = e.target.value;
+                    console.log(`Updated invoice ${idx} field ${fieldName}:`, e.target.value);
                 });
             });
         }
 
         function goToStep(n) {
+            // Hide all steps
             ['step1','step2','step3'].forEach(s => document.getElementById(s).classList.add('hidden'));
+            
+            // Show current step
             document.getElementById('step' + n).classList.remove('hidden');
             
+            // Update indicators
             for (let i = 1; i <= 3; i++) {
                 const dot = document.getElementById('step' + i + '-indicator');
-                dot.className = 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ' + 
-                    (i <= n ? 'bg-cyan-500 text-white' : 'bg-white/10 text-white/50');
-                dot.textContent = i < n ? '✓' : i;
+                if (i < n) {
+                    dot.className = 'w-8 h-8 rounded-full bg-cyan-500 text-white flex items-center justify-center text-sm font-medium';
+                    dot.textContent = '✓';
+                } else if (i === n) {
+                    dot.className = 'w-8 h-8 rounded-full bg-cyan-500 text-white flex items-center justify-center text-sm font-medium';
+                    dot.textContent = i;
+                } else {
+                    dot.className = 'w-8 h-8 rounded-full bg-white/10 text-white/50 flex items-center justify-center text-sm font-medium';
+                    dot.textContent = i;
+                }
             }
+            
+            // Update lines
             document.getElementById('line1').className = 'w-12 h-0.5 ' + (n > 1 ? 'bg-cyan-500' : 'bg-white/10');
             document.getElementById('line2').className = 'w-12 h-0.5 ' + (n > 2 ? 'bg-cyan-500' : 'bg-white/10');
         }
 
         async function submitData() {
+            console.log('📦 Submitting invoices to backend...');
+            
             const submittedData = {
-                invoices: invoices.map(inv => ({
-                    invoice: inv.invoice,
-                    supplier: inv.supplier,
-                    amount: inv.amount,
-                    currency: inv.currency,
-                    date: inv.date
-                })),
+                invoices: invoices,
                 status: 'submitted',
                 submittedAt: new Date().toISOString(),
                 count: invoices.length
             };
 
             try {
+                // Note: We don't need PUT because /api/upload already stored the data
+                // But we can call it to update with any user edits
                 const res = await fetch(`${API_BASE}/api/invoice/${sessionId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -466,15 +371,20 @@
                 });
                 
                 if (res.ok) {
+                    console.log('✅ Data submitted successfully');
                     document.getElementById('success-count').textContent = invoices.length;
                     goToStep(3);
+                } else {
+                    const error = await res.json();
+                    throw new Error(error.message || 'Submission failed');
                 }
             } catch (err) {
-                console.error('Submit error:', err);
-                alert('Error submitting data. Please try again.');
+                console.error('❌ Submit error:', err);
+                alert(`Error submitting data: ${err.message}\n\nPlease try again.`);
             }
         }
 
+        // Initialize on page load
         init();
     </script>
 </body>

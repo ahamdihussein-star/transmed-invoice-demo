@@ -6,18 +6,20 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// In-memory storage for demo
+// In-memory storage for demo - single session
 const sessions = new Map();
 
-// API 1: Create new invoice session
+// API 1: Create new invoice session (fixed DEMO session)
 app.post('/api/invoice/new', (req, res) => {
-  const sessionId = 'INV-' + Date.now().toString(36).toUpperCase();
+  const sessionId = 'DEMO';
   const uploadUrl = `${req.protocol}://${req.get('host')}/upload/${sessionId}`;
   
-  sessions.set(sessionId, {
-    status: 'pending',
-    createdAt: new Date().toISOString()
-  });
+  if (!sessions.has(sessionId)) {
+    sessions.set(sessionId, {
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    });
+  }
   
   res.json({
     success: true,

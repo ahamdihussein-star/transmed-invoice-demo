@@ -110,17 +110,13 @@
         const OCR_KEY = 'K85947283488957';
         const API_BASE = window.location.origin;
         
-        let sessionId = '';
+        let sessionId = 'DEMO';
         let file = null;
         let data = { invoice: '', supplier: '', amount: '', currency: '', date: '' };
 
         function init() {
-            const path = window.location.pathname.split('/');
-            sessionId = path[path.length - 1];
-            if (!sessionId || sessionId === 'upload' || sessionId.length < 5) {
-                sessionId = 'INV-' + Date.now().toString(36).toUpperCase();
-                history.pushState({}, '', `/upload/${sessionId}`);
-            }
+            sessionId = 'DEMO';
+            history.pushState({}, '', `/upload/${sessionId}`);
             document.getElementById('session-id').textContent = sessionId;
             document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
             document.getElementById('invoice-input').onchange = handleFile;

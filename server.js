@@ -15,6 +15,13 @@ app.get('/upload/:sessionId', (req, res) => {
 // In-memory storage for demo - single session
 const sessions = new Map();
 
+// Auto-initialize DEMO session on server startup
+sessions.set('DEMO', {
+  status: 'pending',
+  createdAt: new Date().toISOString()
+});
+console.log('✅ DEMO session initialized');
+
 // API 1: Create new invoice session (fixed DEMO session)
 app.post('/api/invoice/new', (req, res) => {
   const sessionId = 'DEMO';

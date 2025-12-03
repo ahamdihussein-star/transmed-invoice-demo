@@ -31,6 +31,8 @@ async function extractWithNanonets(filePath) {
     form.append('file', fs.createReadStream(filePath));
 
     try {
+        console.log('📤 Sending to Nanonets API...');
+        
         const response = await axios.post(
             `https://app.nanonets.com/api/v2/OCR/Model/${NANONETS_MODEL_ID}/LabelFile/`,
             form,
@@ -39,17 +41,31 @@ async function extractWithNanonets(filePath) {
                     username: NANONETS_API_KEY,
                     password: ''
                 },
-                headers: form.getHeaders()
+                headers: form.getHeaders(),
+                timeout: 60000, // 60 second timeout
+                maxContentLength: Infinity,
+                maxBodyLength: Infinity
             }
         );
 
+        console.log('✅ Nanonets API response received');
+
         if (response.data && response.data.result) {
-            return parseNanonetsResponse(response.data.result);
+            // Store raw response for debugging
+            const rawResponse = response.data;
+            const invoices = parseNanonetsResponse(response.data.result);
+            
+            console.log(`📊 Parsed ${invoices.length} invoices`);
+            
+            return { invoices, raw_response: rawResponse };
         } else {
-            throw new Error('Invalid Nanonets response');
+            throw new Error('Invalid Nanonets response - no result data');
         }
     } catch (error) {
-        console.error('Nanonets API Error:', error.message);
+        console.error('❌ Nanonets API Error:', error.message);
+        if (error.code === 'ECONNABORTED') {
+            throw new Error('Nanonets API timeout - please try again');
+        }
         throw error;
     }
 }
@@ -115,6 +131,9 @@ function parseNanonetsResponse(results) {
                     break;
                 case 'seller_address':
                     invoice.seller_address = value;
+                    break;
+                case 'country':
+                    invoice.country = value;
                     break;
                 case 'buyer_name':
                     invoice.buyer_name = value;
@@ -231,15 +250,25 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
     try {
         console.log(`📄 Processing invoice for session: ${sessionId}`);
+        console.log(`📎 File: ${req.file.originalname} (${req.file.size} bytes)`);
 
         // Extract with Nanonets - RAW DATA ONLY
-        const rawInvoices = await extractWithNanonets(req.file.path);
+        console.log('⏳ Calling Nanonets API...');
+        const result = await extractWithNanonets(req.file.path);
+        
+        console.log('✅ Nanonets extraction complete');
+        const rawInvoices = result.invoices;
+
+        if (!rawInvoices || rawInvoices.length === 0) {
+            throw new Error('No invoices extracted from document');
+        }
 
         console.log(`✅ Extracted ${rawInvoices.length} invoice(s) - RAW DATA`);
 
         // Store RAW data in session
         sessions[sessionId] = {
             raw_invoices: rawInvoices,
+            nanonets_raw_response: result.raw_response, // Store for debugging
             uploaded_at: new Date().toISOString(),
             status: 'raw_extracted'
         };
@@ -247,15 +276,19 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         // Clean up uploaded file
         fs.unlinkSync(req.file.path);
 
-        // Return RAW data for display
+        // Return RAW data for display (with all fields)
         res.json({
             success: true,
             count: rawInvoices.length,
             invoices: rawInvoices.map(inv => ({
                 invoice_number: inv.invoice_number || 'N/A',
+                invoice_date: inv.invoice_date || 'N/A',
                 seller_name: inv.seller_name || 'Unknown',
+                seller_address: inv.seller_address || 'N/A',
+                country: inv.country || 'Unknown',
                 invoice_amount: inv.invoice_amount || '0',
-                currency: inv.currency || 'USD'
+                currency: inv.currency || 'USD',
+                total_tax: inv.total_tax || '0.00'
             }))
         });
 
@@ -284,6 +317,30 @@ app.get('/api/invoice/raw/:sessionId', (req, res) => {
         count: session.raw_invoices.length,
         invoices: session.raw_invoices,
         note: 'Raw data - Agent should process with business logic'
+    });
+});
+
+/**
+ * DEBUG: Get complete session data including Nanonets raw response
+ */
+app.get('/api/debug/session/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const session = sessions[sessionId];
+
+    if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Return complete session for debugging
+    res.json({
+        session_id: sessionId,
+        raw_invoices: session.raw_invoices,
+        available_fields: session.raw_invoices && session.raw_invoices.length > 0 
+            ? Object.keys(session.raw_invoices[0]) 
+            : [],
+        nanonets_response: session.nanonets_raw_response || 'Not stored',
+        uploaded_at: session.uploaded_at,
+        status: session.status
     });
 });
 

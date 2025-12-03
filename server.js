@@ -20,144 +20,126 @@ app.use(express.static('public'));
 app.use(express.json());
 
 // ==========================================
-// HELPER FUNCTIONS - Business Logic
+// NANONETS INTEGRATION (RAW DATA ONLY)
 // ==========================================
 
 /**
- * Determine supplier number based on business rules
+ * Extract invoice data using Nanonets - NO PROCESSING
  */
-function determineSupplierNumber(deliveredFrom, countryOfOrigin, supplierName) {
-    const from = (deliveredFrom || '').toLowerCase().trim();
-    const country = (countryOfOrigin || '').toLowerCase().trim();
-    const name = (supplierName || '').toLowerCase().trim();
+async function extractWithNanonets(filePath) {
+    const form = new FormData();
+    form.append('file', fs.createReadStream(filePath));
 
-    // Oatly rules
-    if (name.includes('oatly')) {
-        if (country.includes('sweden') || country.includes('malmö')) return 600001;
-        if (country.includes('netherlands') || country.includes('nld')) return 600002;
-        return 600000; // Default Oatly
+    try {
+        const response = await axios.post(
+            `https://app.nanonets.com/api/v2/OCR/Model/${NANONETS_MODEL_ID}/LabelFile/`,
+            form,
+            {
+                auth: {
+                    username: NANONETS_API_KEY,
+                    password: ''
+                },
+                headers: form.getHeaders()
+            }
+        );
+
+        if (response.data && response.data.result) {
+            return parseNanonetsResponse(response.data.result);
+        } else {
+            throw new Error('Invalid Nanonets response');
+        }
+    } catch (error) {
+        console.error('Nanonets API Error:', error.message);
+        throw error;
     }
-
-    // Procter & Gamble rules
-    if (name.includes('procter') || name.includes('p&g')) {
-        if (country.includes('egypt')) return 400001;
-        if (country.includes('saudi') || country.includes('bahrain')) return 400002;
-        return 400000; // Default P&G
-    }
-
-    // Nutricia rules
-    if (name.includes('nutricia')) {
-        return 500001;
-    }
-
-    return 999999; // Unknown supplier
 }
 
 /**
- * Convert European decimal format to standard
+ * Parse Nanonets response - JUST EXTRACT, NO PROCESSING
  */
-function convertDecimalFormat(value) {
-    if (!value) return 0;
-    
-    const str = value.toString().trim();
-    
-    // Check if already a valid number (no separators)
-    if (!/[,\.]/.test(str)) {
-        return parseFloat(str) || 0;
-    }
-    
-    // Detect format based on comma and dot positions
-    const lastComma = str.lastIndexOf(',');
-    const lastDot = str.lastIndexOf('.');
-    
-    if (lastComma > lastDot) {
-        // European format: "26.827,20" or "26 827,20"
-        // Remove dots and spaces, replace comma with dot
-        return parseFloat(
-            str.replace(/\./g, '')
-               .replace(/\s/g, '')
-               .replace(',', '.')
-        ) || 0;
-    } else if (lastDot > lastComma) {
-        // US format: "26,827.20"
-        // Remove commas and spaces, keep dot
-        return parseFloat(
-            str.replace(/,/g, '')
-               .replace(/\s/g, '')
-        ) || 0;
-    } else {
-        // Only one separator - check which one
-        if (lastComma !== -1) {
-            // Has comma - could be "827,20" (European) or error
-            const parts = str.split(',');
-            if (parts[1] && parts[1].length === 2) {
-                // Likely European decimal: "827,20"
-                return parseFloat(str.replace(',', '.')) || 0;
+function parseNanonetsResponse(results) {
+    const invoices = [];
+
+    console.log('\n📊 Nanonets Extraction (Raw Data)');
+    console.log('═══════════════════════════════════════');
+    console.log('Total results:', results.length);
+
+    for (let r = 0; r < results.length; r++) {
+        const result = results[r];
+        const predictions = result.prediction || [];
+        
+        const invoice = {};
+
+        // Extract fields from predictions - RAW VALUES ONLY
+        for (const pred of predictions) {
+            const label = pred.label;
+            const value = pred.ocr_text;
+
+            // Direct extraction - NO TRANSFORMATION
+            switch (label) {
+                case 'invoice_number':
+                    invoice.invoice_number = value;
+                    break;
+                case 'invoice_date':
+                    invoice.invoice_date = value;
+                    break;
+                case 'seller_name':
+                    invoice.seller_name = value;
+                    break;
+                case 'invoice_amount':
+                case 'total_due_amount':
+                    if (!invoice.invoice_amount) {
+                        invoice.invoice_amount = value;
+                    }
+                    break;
+                case 'subtotal':
+                    if (!invoice.subtotal) {
+                        invoice.subtotal = value;
+                    }
+                    break;
+                case 'total_tax':
+                    invoice.total_tax = value;
+                    break;
+                case 'total_tax_percentage':
+                    if (!invoice.tax_percentage) {
+                        invoice.tax_percentage = value;
+                    }
+                    break;
+                case 'currency':
+                    invoice.currency = value;
+                    break;
+                case 'seller_address':
+                    invoice.seller_address = value;
+                    break;
+                case 'buyer_name':
+                    invoice.buyer_name = value;
+                    break;
+                case 'po_number':
+                    invoice.po_number = value;
+                    break;
             }
         }
-        // Fallback: remove all non-numeric except last dot/comma
-        return parseFloat(str.replace(/[^0-9.]/g, '')) || 0;
+
+        if (Object.keys(invoice).length > 0) {
+            console.log(`\n✓ Invoice ${r + 1}:`, invoice.invoice_number || 'N/A');
+            invoices.push(invoice);
+        }
     }
-}
 
-/**
- * Format date to dd/mm/yyyy
- */
-function formatDate(date) {
-    const d = new Date(date);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
-}
+    console.log(`\n✅ Extracted ${invoices.length} raw invoices`);
+    console.log('═══════════════════════════════════════\n');
 
-/**
- * Transform extracted data to business format
- */
-function transformInvoiceData(extractedData) {
-    const delivered_from = extractedData.delivered_from || extractedData.Delivered_From || '';
-    const country_oo = extractedData.country_of_origin || extractedData.Country_of_origin || '';
-    const supplier_name = extractedData.supplier_name || extractedData.Supplier_Name || '';
-    const currency = extractedData.currency || extractedData.Currency || 'USD';
-
-    return {
-        invoice_number: extractedData.invoice_number || extractedData.invoice_number || 'N/A',
-        delivered_from: delivered_from.trim(),
-        country_oo: country_oo,
-        supplier_number: determineSupplierNumber(delivered_from, country_oo, supplier_name),
-        invoice_date: extractedData.invoice_date || extractedData.Invoice_Date || new Date().toISOString(),
-        gl_date: formatDate(new Date()),
-        total_payable: convertDecimalFormat(extractedData.total_payable || extractedData.Total_Payable || 0),
-        total_price: convertDecimalFormat(extractedData.total_price || extractedData.Total_Price || 0),
-        vat: convertDecimalFormat(extractedData.vat || extractedData.VAT_Amount || 0),
-        slog_discount: convertDecimalFormat(extractedData.slog_discount || extractedData.SLOG_Discount || 0),
-        currency: currency === 'DHS' ? 'AED' : currency,
-        tax_rate_area: '',
-        tax_ex: '',
-        exchange_rate: 1,
-        supplier_name: supplier_name
-    };
-}
-
-/**
- * Calculate tax fields
- */
-function calculateTaxFields(invoiceData) {
-    if (invoiceData.vat > 0) {
-        invoiceData.tax_rate_area = 'VD03';
-        invoiceData.tax_ex = 'V';
-    }
-    return invoiceData;
+    return invoices;
 }
 
 // ==========================================
-// MOCK APIs
+// HELPER APIs FOR AGENT
 // ==========================================
 
 /**
  * Mock Exchange Rate API
  */
-async function fetchExchangeRate(currency) {
+async function getExchangeRate(fromCurrency, toCurrency = 'AED') {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -169,11 +151,13 @@ async function fetchExchangeRate(currency) {
         'GBP': 4.52
     };
 
+    const rate = rates[fromCurrency] || 1;
+
     return {
         success: true,
-        currency: currency,
-        rate: rates[currency] || 1,
-        base: 'AED',
+        from: fromCurrency,
+        to: toCurrency,
+        rate: rate,
         date: new Date().toISOString()
     };
 }
@@ -209,7 +193,7 @@ async function bookInvoiceToPayables(invoiceData) {
             reference: bookingRef,
             invoice_number: invoiceData.invoice_number,
             supplier_number: invoiceData.supplier_number,
-            amount: invoiceData.total_payable,
+            amount: invoiceData.total_amount,
             currency: invoiceData.currency,
             booked_at: new Date().toISOString(),
             token_used: token
@@ -217,136 +201,6 @@ async function bookInvoiceToPayables(invoiceData) {
     } finally {
         await releaseToken(token);
     }
-}
-
-// ==========================================
-// NANONETS INTEGRATION
-// ==========================================
-
-/**
- * Extract invoice data using Nanonets
- */
-async function extractWithNanonets(filePath) {
-    const form = new FormData();
-    form.append('file', fs.createReadStream(filePath));
-
-    try {
-        const response = await axios.post(
-            `https://app.nanonets.com/api/v2/OCR/Model/${NANONETS_MODEL_ID}/LabelFile/`,
-            form,
-            {
-                auth: {
-                    username: NANONETS_API_KEY,
-                    password: ''
-                },
-                headers: form.getHeaders()
-            }
-        );
-
-        if (response.data && response.data.result) {
-            return parseNanonetsResponse(response.data.result);
-        } else {
-            throw new Error('Invalid Nanonets response');
-        }
-    } catch (error) {
-        console.error('Nanonets API Error:', error.message);
-        throw error;
-    }
-}
-
-/**
- * Parse Nanonets response to extract invoice data
- */
-function parseNanonetsResponse(results) {
-    const invoices = [];
-
-    console.log('\n═════════════════════════════════════════');
-    console.log('📊 NANONETS RESPONSE DEBUG');
-    console.log('═════════════════════════════════════════');
-    console.log('Total results:', results.length);
-
-    // Nanonets returns array of predictions
-    for (let r = 0; r < results.length; r++) {
-        const result = results[r];
-        const predictions = result.prediction || [];
-        
-        console.log(`\n--- Result #${r + 1} ---`);
-        console.log('Predictions count:', predictions.length);
-        
-        const invoice = {};
-
-        // LOG ALL LABELS to see what Nanonets actually returns
-        console.log('\nAvailable labels:');
-        predictions.forEach((pred, i) => {
-            console.log(`  [${i}] label: "${pred.label}" = "${pred.ocr_text?.substring(0, 50)}..."`);
-        });
-
-        // Extract fields from predictions
-        for (const pred of predictions) {
-            const label = pred.label;
-            const value = pred.ocr_text;
-
-            // Direct mapping for known Nanonets labels
-            switch (label) {
-                case 'invoice_number':
-                    invoice.invoice_number = value;
-                    break;
-                case 'invoice_date':
-                    invoice.invoice_date = value;
-                    break;
-                case 'seller_name':
-                    invoice.supplier_name = value;
-                    break;
-                case 'invoice_amount':
-                case 'total_due_amount':
-                    if (!invoice.total_payable) {
-                        invoice.total_payable = value;
-                    }
-                    break;
-                case 'subtotal':
-                    if (!invoice.total_price) {
-                        invoice.total_price = value;
-                    }
-                    break;
-                case 'total_tax':
-                    invoice.vat = value;
-                    break;
-                case 'total_tax_percentage':
-                    if (!invoice.vat) {
-                        invoice.vat = value;
-                    }
-                    break;
-                case 'currency':
-                    invoice.currency = value;
-                    break;
-                case 'seller_address':
-                    // Extract country from address (e.g., "Sweden" from "BOX 588\n201 25\nMalmö\nSweden")
-                    if (value && value.includes('\n')) {
-                        const lines = value.split('\n').map(l => l.trim()).filter(l => l);
-                        const lastLine = lines[lines.length - 1];
-                        // Last line is usually the country
-                        invoice.country_of_origin = lastLine;
-                        invoice.delivered_from = lastLine;
-                    } else {
-                        invoice.delivered_from = value;
-                    }
-                    break;
-            }
-        }
-
-        console.log('\n📦 Extracted invoice:');
-        console.log(JSON.stringify(invoice, null, 2));
-
-        if (Object.keys(invoice).length > 0) {
-            invoices.push(invoice);
-        }
-    }
-
-    console.log('\n═════════════════════════════════════════');
-    console.log(`✅ Final invoices count: ${invoices.length}`);
-    console.log('═════════════════════════════════════════\n');
-
-    return invoices;
 }
 
 // ==========================================
@@ -361,7 +215,7 @@ app.get('/upload/:sessionId', (req, res) => {
 });
 
 /**
- * Upload and extract invoice
+ * Upload and extract invoice - RAW DATA ONLY
  */
 app.post('/api/upload', upload.single('file'), async (req, res) => {
     const sessionId = req.body.sessionId || 'DEMO';
@@ -373,31 +227,31 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     try {
         console.log(`📄 Processing invoice for session: ${sessionId}`);
 
-        // Extract with Nanonets
-        const extractedInvoices = await extractWithNanonets(req.file.path);
+        // Extract with Nanonets - RAW DATA ONLY
+        const rawInvoices = await extractWithNanonets(req.file.path);
 
-        console.log(`✅ Extracted ${extractedInvoices.length} invoice(s)`);
+        console.log(`✅ Extracted ${rawInvoices.length} invoice(s) - RAW DATA`);
 
-        // Transform data
-        const processedInvoices = extractedInvoices.map(inv => {
-            const transformed = transformInvoiceData(inv);
-            return calculateTaxFields(transformed);
-        });
-
-        // Store in session
+        // Store RAW data in session
         sessions[sessionId] = {
-            invoices: processedInvoices,
+            raw_invoices: rawInvoices,
             uploaded_at: new Date().toISOString(),
-            status: 'extracted'
+            status: 'raw_extracted'
         };
 
         // Clean up uploaded file
         fs.unlinkSync(req.file.path);
 
+        // Return RAW data for display
         res.json({
             success: true,
-            count: processedInvoices.length,
-            invoices: processedInvoices
+            count: rawInvoices.length,
+            invoices: rawInvoices.map(inv => ({
+                invoice_number: inv.invoice_number || 'N/A',
+                seller_name: inv.seller_name || 'Unknown',
+                invoice_amount: inv.invoice_amount || '0',
+                currency: inv.currency || 'USD'
+            }))
         });
 
     } catch (error) {
@@ -410,84 +264,63 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 });
 
 /**
- * Update invoice data (after user review)
+ * Get RAW invoice data (for Boomi Agent)
  */
-app.put('/api/invoice/:sessionId', express.json(), (req, res) => {
+app.get('/api/invoice/raw/:sessionId', (req, res) => {
     const { sessionId } = req.params;
-    const { data } = req.body;
+    const session = sessions[sessionId];
 
-    if (!sessions[sessionId]) {
-        sessions[sessionId] = {};
-    }
-
-    // Update with user-edited data
-    if (data && data.invoices) {
-        sessions[sessionId].invoices = data.invoices;
-        sessions[sessionId].status = data.status || 'updated';
-        sessions[sessionId].updated_at = new Date().toISOString();
+    if (!session || !session.raw_invoices) {
+        return res.status(404).json({ error: 'No invoice data found' });
     }
 
     res.json({
         success: true,
-        message: 'Invoice data updated successfully'
+        count: session.raw_invoices.length,
+        invoices: session.raw_invoices,
+        note: 'Raw data - Agent should process with business logic'
     });
 });
 
 /**
- * Get invoice data (for Boomi Agent)
+ * Get exchange rate (for Boomi Agent)
  */
-app.get('/api/invoice/:sessionId', async (req, res) => {
-    const { sessionId } = req.params;
-    const session = sessions[sessionId];
+app.get('/api/exchange-rate/:currency', async (req, res) => {
+    const { currency } = req.params;
+    const toCurrency = req.query.to || 'AED';
 
-    if (!session || !session.invoices) {
-        return res.status(404).json({ error: 'No invoice data found' });
+    try {
+        const rateData = await getExchangeRate(currency, toCurrency);
+        res.json(rateData);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get exchange rate' });
     }
-
-    // Fetch exchange rates for each invoice
-    const invoicesWithRates = await Promise.all(
-        session.invoices.map(async (inv) => {
-            const rateData = await fetchExchangeRate(inv.currency);
-            return {
-                ...inv,
-                exchange_rate: rateData.rate,
-                exchange_rate_date: rateData.date
-            };
-        })
-    );
-
-    session.invoices = invoicesWithRates;
-    session.status = 'enriched';
-
-    res.json({
-        success: true,
-        count: invoicesWithRates.length,
-        invoices: invoicesWithRates
-    });
 });
 
 /**
- * Finalize invoice booking (for Boomi Agent)
+ * Book processed invoice (for Boomi Agent)
  */
-app.post('/api/finalize/:sessionId', async (req, res) => {
-    const { sessionId } = req.params;
-    const session = sessions[sessionId];
+app.post('/api/invoice/book', express.json(), async (req, res) => {
+    const { sessionId, invoices } = req.body;
 
-    if (!session || !session.invoices) {
-        return res.status(404).json({ error: 'No invoice data found' });
+    if (!invoices || !Array.isArray(invoices)) {
+        return res.status(400).json({ error: 'Invalid invoice data' });
     }
 
     try {
-        console.log(`📦 Booking ${session.invoices.length} invoice(s) to Payables...`);
+        console.log(`📦 Booking ${invoices.length} invoice(s)...`);
 
         // Book each invoice
         const bookingResults = await Promise.all(
-            session.invoices.map(inv => bookInvoiceToPayables(inv))
+            invoices.map(inv => bookInvoiceToPayables(inv))
         );
 
-        session.booking_results = bookingResults;
-        session.status = 'booked';
-        session.booked_at = new Date().toISOString();
+        // Update session
+        if (sessionId && sessions[sessionId]) {
+            sessions[sessionId].booking_results = bookingResults;
+            sessions[sessionId].status = 'booked';
+            sessions[sessionId].booked_at = new Date().toISOString();
+        }
 
         console.log(`✅ All invoices booked successfully`);
 
@@ -507,14 +340,40 @@ app.post('/api/finalize/:sessionId', async (req, res) => {
 });
 
 /**
+ * Update invoice data (after user review)
+ */
+app.put('/api/invoice/:sessionId', express.json(), (req, res) => {
+    const { sessionId } = req.params;
+    const { data } = req.body;
+
+    if (!sessions[sessionId]) {
+        sessions[sessionId] = {};
+    }
+
+    // Store user-edited raw data
+    if (data && data.invoices) {
+        sessions[sessionId].raw_invoices = data.invoices;
+        sessions[sessionId].status = 'user_reviewed';
+        sessions[sessionId].updated_at = new Date().toISOString();
+    }
+
+    res.json({
+        success: true,
+        message: 'Invoice data updated successfully'
+    });
+});
+
+/**
  * Health check
  */
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
+        mode: 'agent_version',
         nanonets: 'configured',
         model_id: NANONETS_MODEL_ID,
-        sessions: Object.keys(sessions).length
+        sessions: Object.keys(sessions).length,
+        note: 'Returns raw data - Agent processes with business logic'
     });
 });
 
@@ -526,17 +385,22 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log('');
     console.log('╔═══════════════════════════════════════╗');
-    console.log('║   Transmed Invoice Processing API    ║');
+    console.log('║   Transmed Invoice API (Agent Ver)   ║');
     console.log('╚═══════════════════════════════════════╝');
     console.log('');
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🔗 Upload URL: http://localhost:${PORT}/upload/DEMO`);
     console.log(`🧪 Health check: http://localhost:${PORT}/health`);
     console.log('');
-    console.log('📋 Nanonets Integration:');
-    console.log(`   Model ID: ${NANONETS_MODEL_ID}`);
-    console.log(`   Status: Active`);
+    console.log('📋 Mode: Agent-Driven Processing');
+    console.log('   - Returns RAW Nanonets data');
+    console.log('   - Agent handles business logic');
     console.log('');
-    console.log('🚀 Ready to process invoices!');
+    console.log('🎯 Agent APIs:');
+    console.log('   GET  /api/invoice/raw/:sessionId');
+    console.log('   GET  /api/exchange-rate/:currency');
+    console.log('   POST /api/invoice/book');
+    console.log('');
+    console.log('🚀 Ready for Agent orchestration!');
     console.log('');
 });

@@ -193,22 +193,22 @@
             const summaryEl = document.getElementById('extracted-summary');
             
             if (invoices.length > 0) {
-                countEl.textContent = `✓ Successfully extracted ${invoices.length} invoice(s)`;
+                countEl.textContent = `✓ Successfully extracted ${invoices.length} invoice(s) - Raw OCR Data`;
                 
-                let html = '';
+                let html = '<p class="text-white/60 text-xs mb-3">⚠️ This is raw OCR data. Boomi Agent will process and apply business rules.</p>';
                 invoices.forEach((inv, idx) => {
                     html += `<div class="p-3 bg-white/5 rounded-lg border border-white/10">
                         <div class="flex items-start justify-between">
                             <div class="flex-1">
                                 <p class="text-white font-medium">#${idx + 1}: ${inv.invoice_number || 'N/A'}</p>
                                 <p class="text-white/60 text-xs mt-1">
-                                    ${inv.supplier_name || 'Unknown Supplier'} • 
-                                    ${inv.total_payable || '0'} ${inv.currency || 'USD'}
+                                    ${inv.seller_name || 'Unknown'} • 
+                                    ${inv.invoice_amount || '0'} ${inv.currency || 'USD'}
                                 </p>
                             </div>
                             <div class="ml-2">
-                                <span class="inline-block px-2 py-1 bg-emerald-500/20 text-emerald-400 text-xs rounded">
-                                    Supplier #${inv.supplier_number || '999999'}
+                                <span class="inline-block px-2 py-1 bg-yellow-500/20 text-yellow-400 text-xs rounded">
+                                    Raw Data
                                 </span>
                             </div>
                         </div>

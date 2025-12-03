@@ -113,11 +113,6 @@ function parseNanonetsResponse(results) {
                         invoice.invoice_amount = value;
                     }
                     break;
-                case 'subtotal':
-                    if (!invoice.subtotal) {
-                        invoice.subtotal = value;
-                    }
-                    break;
                 case 'total_tax':
                     invoice.total_tax = value;
                     break;
@@ -137,9 +132,6 @@ function parseNanonetsResponse(results) {
                     break;
                 case 'buyer_name':
                     invoice.buyer_name = value;
-                    break;
-                case 'po_number':
-                    invoice.po_number = value;
                     break;
             }
         }

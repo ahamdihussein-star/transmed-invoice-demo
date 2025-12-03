@@ -124,9 +124,6 @@ function parseNanonetsResponse(results) {
                 case 'currency':
                     invoice.currency = value;
                     break;
-                case 'seller_address':
-                    invoice.seller_address = value;
-                    break;
                 case 'country':
                     invoice.country = value;
                     break;
@@ -276,7 +273,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
                 invoice_number: inv.invoice_number || 'N/A',
                 invoice_date: inv.invoice_date || 'N/A',
                 seller_name: inv.seller_name || 'Unknown',
-                seller_address: inv.seller_address || 'N/A',
                 country: inv.country || 'Unknown',
                 invoice_amount: inv.invoice_amount || '0',
                 currency: inv.currency || 'USD',

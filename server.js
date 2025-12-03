@@ -337,7 +337,102 @@ app.get('/api/exchange-rates', async (req, res) => {
 });
 
 /**
- * Book processed invoice (for Boomi Agent)
+ * SIMPLIFIED: Book invoices using session ID only (for Boomi Agent)
+ * Agent provides processed invoice data as separate parameters
+ */
+app.post('/api/invoice/book-simple', express.json(), async (req, res) => {
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+        return res.status(400).json({ 
+            error: 'Missing sessionId',
+            message: 'sessionId is required'
+        });
+    }
+
+    // Get session data
+    const session = sessions[sessionId];
+    if (!session || !session.processed_invoices) {
+        return res.status(400).json({ 
+            error: 'No processed invoices found',
+            message: `No processed invoice data found for session: ${sessionId}`
+        });
+    }
+
+    const invoices = session.processed_invoices;
+
+    try {
+        console.log(`📦 Booking ${invoices.length} invoice(s) from session ${sessionId}...`);
+        console.log('Sample invoice:', JSON.stringify(invoices[0], null, 2));
+
+        // Book each invoice
+        const bookingResults = await Promise.all(
+            invoices.map(inv => bookInvoiceToPayables(inv))
+        );
+
+        // Update session
+        session.booking_results = bookingResults;
+        session.status = 'booked';
+        session.booked_at = new Date().toISOString();
+
+        console.log(`✅ All invoices booked successfully`);
+
+        res.json({
+            success: true,
+            count: bookingResults.length,
+            bookings: bookingResults
+        });
+
+    } catch (error) {
+        console.error('❌ Booking error:', error);
+        res.status(500).json({
+            error: 'Failed to book invoices',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * Store processed invoices in session (for Boomi Agent workflow)
+ */
+app.post('/api/invoice/store-processed', express.json(), async (req, res) => {
+    const { sessionId, invoices } = req.body;
+
+    if (!sessionId) {
+        return res.status(400).json({ 
+            error: 'Missing sessionId',
+            message: 'sessionId is required'
+        });
+    }
+
+    if (!invoices || !Array.isArray(invoices) || invoices.length === 0) {
+        return res.status(400).json({ 
+            error: 'Invalid invoices data',
+            message: 'invoices must be a non-empty array'
+        });
+    }
+
+    // Ensure session exists
+    if (!sessions[sessionId]) {
+        sessions[sessionId] = {};
+    }
+
+    // Store processed invoices
+    sessions[sessionId].processed_invoices = invoices;
+    sessions[sessionId].processed_at = new Date().toISOString();
+
+    console.log(`💾 Stored ${invoices.length} processed invoice(s) for session ${sessionId}`);
+
+    res.json({
+        success: true,
+        sessionId: sessionId,
+        count: invoices.length,
+        message: 'Processed invoices stored successfully'
+    });
+});
+
+/**
+ * Book processed invoice (for Boomi Agent - Original complex version)
  */
 app.post('/api/invoice/book', express.json(), async (req, res) => {
     const { sessionId, invoices } = req.body;

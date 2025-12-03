@@ -69,6 +69,11 @@ function parseNanonetsResponse(results) {
         const predictions = result.prediction || [];
         
         const invoice = {};
+        
+        // Store raw OCR text for Agent to extract missing fields
+        if (result.ocr_text) {
+            invoice.raw_ocr_text = result.ocr_text;
+        }
 
         // Extract fields from predictions - RAW VALUES ONLY
         for (const pred of predictions) {
@@ -294,6 +299,40 @@ app.get('/api/exchange-rate/:currency', async (req, res) => {
         res.json(rateData);
     } catch (error) {
         res.status(500).json({ error: 'Failed to get exchange rate' });
+    }
+});
+
+// Simplified exchange rate endpoint for Boomi Agent (always returns to AED)
+app.get('/api/rate/:currency', async (req, res) => {
+    const { currency } = req.params;
+    
+    try {
+        const rateData = await getExchangeRate(currency, 'AED');
+        res.json(rateData);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get exchange rate' });
+    }
+});
+
+// Get all exchange rates to AED (no parameters needed)
+app.get('/api/exchange-rates', async (req, res) => {
+    try {
+        const rates = {
+            success: true,
+            base_currency: 'AED',
+            rates: {
+                EUR: 3.95,
+                USD: 3.67,
+                GBP: 4.82,
+                SAR: 0.98,
+                AED: 1.0
+            },
+            timestamp: new Date().toISOString()
+        };
+        
+        res.json(rates);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get exchange rates' });
     }
 });
 

@@ -342,12 +342,53 @@ app.get('/api/exchange-rates', async (req, res) => {
 app.post('/api/invoice/book', express.json(), async (req, res) => {
     const { sessionId, invoices } = req.body;
 
+    // Validate invoices array
     if (!invoices || !Array.isArray(invoices)) {
-        return res.status(400).json({ error: 'Invalid invoice data' });
+        return res.status(400).json({ 
+            error: 'Invalid invoice data',
+            message: 'Expected "invoices" to be an array'
+        });
+    }
+
+    if (invoices.length === 0) {
+        return res.status(400).json({ 
+            error: 'Invalid invoice data',
+            message: 'Invoices array is empty'
+        });
+    }
+
+    // Validate each invoice has required fields
+    const requiredFields = ['invoice_number', 'supplier_number', 'total_amount', 'currency'];
+    for (let i = 0; i < invoices.length; i++) {
+        const invoice = invoices[i];
+        const missingFields = requiredFields.filter(field => !invoice[field]);
+        
+        if (missingFields.length > 0) {
+            return res.status(400).json({ 
+                error: 'Invalid invoice data',
+                message: `Invoice ${i + 1} (${invoice.invoice_number || 'unknown'}) missing fields: ${missingFields.join(', ')}`
+            });
+        }
+
+        // Validate data types
+        if (typeof invoice.supplier_number !== 'number') {
+            return res.status(400).json({ 
+                error: 'Invalid invoice data',
+                message: `Invoice ${i + 1}: supplier_number must be a number, got ${typeof invoice.supplier_number}`
+            });
+        }
+
+        if (typeof invoice.total_amount !== 'number') {
+            return res.status(400).json({ 
+                error: 'Invalid invoice data',
+                message: `Invoice ${i + 1}: total_amount must be a number, got ${typeof invoice.total_amount}`
+            });
+        }
     }
 
     try {
         console.log(`📦 Booking ${invoices.length} invoice(s)...`);
+        console.log('Sample invoice:', JSON.stringify(invoices[0], null, 2));
 
         // Book each invoice
         const bookingResults = await Promise.all(
